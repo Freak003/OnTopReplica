@@ -1,0 +1,49 @@
+name: Build and Package
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  build-and-package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore NuGet packages
+        run: |
+          pushd src
+          nuget restore OnTopReplica.sln
+          popd
+
+      - name: Build solution (Release)
+        run: |
+          msbuild src/OnTopReplica.sln /p:Configuration=Release /m
+
+      - name: List Release dir (debug)
+        run: |
+          dir src\OnTopReplica\bin\Release
+
+      - name: Upload Release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnTopReplica-release
+          path: src/OnTopReplica/bin/Release
+
+      - name: Install Inno Setup (for installer)
+        run: choco install innosetup -y
+
+      - name: Compile Inno Setup installer
+        env:
+          PROJECT_EXE_PATH: ${{ github.workspace }}\src\OnTopReplica\bin\Release
+        run: |
+          "%ProgramFiles(x86)%\\Inno Setup 6\\ISCC.exe" Installer\\OnTopReplica.iss /DProjectExePath="%PROJECT_EXE_PATH%"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnTopReplica-installer
+          path: OnTopReplica_Setup.exe
