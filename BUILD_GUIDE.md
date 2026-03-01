@@ -218,6 +218,30 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Configuration Release -Actio
 ### 脚本故障排查
 
 - 报错 "找不到 MSBuild.exe"：请安装 Visual Studio 或 Build Tools。
+- 如果出现类似 “找不到 .NETFramework,Version=v4.7 的引用程序集” 错误，说明需要安装 **.NET Framework 4.7 Developer Pack**。
+  可在 https://dotnet.microsoft.com/en-us/download/dotnet-framework/net47官方下载并安装。
+  
+  安装方法（任选其一）：
+
+  1. 通过 Visual Studio Installer 添加（推荐）
+    - 打开 **Visual Studio Installer** → 找到已安装的 **Build Tools for Visual Studio 2022** → 点击 **Modify**。
+    - 切换到 **Individual components**，在搜索框输入 `4.7`，勾选 **.NET Framework 4.7 targeting pack** 或 **Developer Pack**，点击 **Modify** 安装。
+
+  2. 从微软官网下载 Developer Pack（手动）
+    - 打开： https://dotnet.microsoft.com/en-us/download/dotnet-framework/net47
+    - 下载页面中选择 **Developer Pack**（Targeting Pack），下载并以管理员身份运行安装程序。
+
+  3. 使用官方包管理器（如 winget，视源是否包含）
+    - 示例（可能在你的环境中不可用）：
+     ```powershell
+     winget install --id Microsoft.DotNet.Framework.47.DeveloperPack -e
+     ```
+
+  安装完成后请关闭并重新打开终端或 VS Code，然后运行：
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File build.ps1 -Configuration Debug
+  ```
+  如果仍报错，请把构建输出贴给我，我会继续协助。
 - 可以手动运行 `msbuild` 并观察输出，或将脚本输出记录到文件供分析。
 
 ---
@@ -274,6 +298,16 @@ Get-Item "E:\clo\OnTopReplica\src\OnTopReplica\bin\Release\OnTopReplica.exe" |
 3. 快捷方式已创建在桌面
 4. 可以随时点击打开
 ```
+
+### 在 Visual Studio Code 中编译并运行
+
+仓库包含 `.vscode/tasks.json` 和 `.vscode/launch.json` 配置，可直接在 VS Code 里构建并调试。
+
+1. 打开整个工作区（根目录）
+2. 按 `Ctrl+Shift+B` 运行默认任务 `Build OnTopReplica`（实际上是调用 `build.ps1 -Configuration Debug`）
+3. 在“运行和调试”视图选择 **Launch OnTopReplica** 并点击绿色三角按钮启动
+
+该配置会在 `src\OnTopReplica\bin\Debug` 下生成可执行文件，并自动启动它供调试。
 
 ---
 

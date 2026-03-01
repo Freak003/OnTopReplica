@@ -50,9 +50,9 @@ $projectPath = $scriptPath
 $solutionFile = Join-Path $projectPath "src\OnTopReplica.sln"
 $exePath = Join-Path $projectPath "src\OnTopReplica\bin\$Configuration\OnTopReplica.exe"
 
-Write-Host "════════════════════════════════════════════════════" -ForegroundColor Magenta
-Write-Host "  OnTopReplica 编译工具" -ForegroundColor Magenta
-Write-Host "════════════════════════════════════════════════════" -ForegroundColor Magenta
+Write-Host "====================================================" -ForegroundColor Magenta
+Write-Host "  OnTopReplica build helper" -ForegroundColor Magenta
+Write-Host "====================================================" -ForegroundColor Magenta
 Write-Info "配置: $Configuration"
 Write-Info "操作: $Action"
 Write-Info ""
@@ -141,10 +141,10 @@ if ($Action -eq "Clean" -or $Action -eq "Rebuild") {
 if ($Action -eq "Build" -or $Action -eq "Rebuild") {
     Write-Host ""
     Write-Info "开始编译 $Configuration 版本..."
-    Write-Info "命令: & '$msbuildPath' '$solutionFile' /p:Configuration=$Configuration /p:Platform=AnyCPU /v:minimal"
+    Write-Info "命令: & '$msbuildPath' '$solutionFile' \"/p:Configuration=$Configuration\" \"/p:Platform=Any CPU\" /v:minimal"
     Write-Host ""
     
-    & $msbuildPath $solutionFile /p:Configuration=$Configuration /p:Platform=AnyCPU /v:minimal
+    & $msbuildPath $solutionFile "/p:Configuration=$Configuration" "/p:Platform=Any CPU" "/v:minimal"
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
