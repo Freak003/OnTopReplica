@@ -96,6 +96,7 @@
             this.chromeToolStripMenuItem,
             this.reduceToIconToolStripMenuItem,
             this.toolStripSeparator1,
+            this.colorAlertToolStripMenuItem,
             this.settingsToolStripMenuItem,
             this.aboutToolStripMenuItem,
             this.menuContextClose});
@@ -426,6 +427,14 @@
             this.settingsToolStripMenuItem.ToolTipText = global::OnTopReplica.Strings.MenuSettingsTT;
             this.settingsToolStripMenuItem.Click += new System.EventHandler(this.Menu_Settings_click);
             // 
+            // colorAlertToolStripMenuItem
+            // 
+            this.colorAlertToolStripMenuItem.Name = "colorAlertToolStripMenuItem";
+            this.colorAlertToolStripMenuItem.Size = new System.Drawing.Size(186, 22);
+            this.colorAlertToolStripMenuItem.Text = "Color Alert";
+            this.colorAlertToolStripMenuItem.ToolTipText = "Monitor window for specific color and alert";
+            this.colorAlertToolStripMenuItem.Click += new System.EventHandler(this.Menu_ColorAlert_click);
+            // 
             // aboutToolStripMenuItem
             // 
             this.aboutToolStripMenuItem.Image = global::OnTopReplica.Properties.Resources.help;
@@ -559,6 +568,7 @@
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem3;
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem4;
         private System.Windows.Forms.ToolStripMenuItem aboutToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem colorAlertToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem reduceToIconToolStripMenuItem;
 		private System.Windows.Forms.ToolStripMenuItem selectRegionToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem resizeToolStripMenuItem;
