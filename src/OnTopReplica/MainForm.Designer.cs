@@ -64,6 +64,7 @@
             this.chromeToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.reduceToIconToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
+            this.colorAlertToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.settingsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.aboutToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuContextClose = new System.Windows.Forms.ToolStripMenuItem();
@@ -431,8 +432,8 @@
             // 
             this.colorAlertToolStripMenuItem.Name = "colorAlertToolStripMenuItem";
             this.colorAlertToolStripMenuItem.Size = new System.Drawing.Size(186, 22);
-            this.colorAlertToolStripMenuItem.Text = "Color Alert";
-            this.colorAlertToolStripMenuItem.ToolTipText = "Monitor window for specific color and alert";
+            this.colorAlertToolStripMenuItem.Text = global::OnTopReplica.Strings.ColorAlert_Title;
+            this.colorAlertToolStripMenuItem.ToolTipText = global::OnTopReplica.Strings.ColorAlert_MenuTooltip ?? "Monitor window for specific color and alert";
             this.colorAlertToolStripMenuItem.Click += new System.EventHandler(this.Menu_ColorAlert_click);
             // 
             // aboutToolStripMenuItem

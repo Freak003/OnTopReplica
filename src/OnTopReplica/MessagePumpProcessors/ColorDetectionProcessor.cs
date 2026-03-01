@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Windows.Forms;
 using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
 using OnTopReplica.Native;
 using OnTopReplica.Properties;
@@ -14,22 +15,40 @@ namespace OnTopReplica.MessagePumpProcessors {
     class ColorDetectionProcessor : BaseMessagePumpProcessor {
 
         private bool _enabled = false;
-        private Color _targetColor = Color.Red;
+        private List<Color> _targetColors = new List<Color>() { Color.Red };
         private int _colorTolerance = 30; // Tolerance for color matching (0-255)
         private int _sampleInterval = 500; // Sampling interval in milliseconds
+        private float _alarmVolume = 1.0f; // 0.0 - 1.0
+        private string _alarmSoundFile = string.Empty;
         private long _lastSampleTick = 0;
         private bool _alarmActive = false;
         private long _alarmStartTick = 0;
         private const int AlarmDuration = 3000; // 3 seconds in milliseconds
+        private System.Windows.Media.MediaPlayer _mediaPlayer;
 
         public bool Enabled {
             get { return _enabled; }
             set { _enabled = value; }
         }
 
+        /// <summary>
+        /// Primary color for backwards compatibility. Setting this will clear the list and
+        /// keep only the supplied value as the single target color.
+        /// </summary>
         public Color TargetColor {
-            get { return _targetColor; }
-            set { _targetColor = value; }
+            get { return _targetColors.Count > 0 ? _targetColors[0] : Color.Red; }
+            set {
+                _targetColors.Clear();
+                _targetColors.Add(value);
+            }
+        }
+
+        /// <summary>
+        /// List of colors that should trigger the alarm when found in the window.
+        /// </summary>
+        public List<Color> TargetColors {
+            get { return _targetColors; }
+            set { _targetColors = value ?? new List<Color>(); }
         }
 
         public int ColorTolerance {
@@ -46,9 +65,25 @@ namespace OnTopReplica.MessagePumpProcessors {
             get { return _alarmActive; }
         }
 
+        public float AlarmVolume {
+            get { return _alarmVolume; }
+            set { _alarmVolume = Math.Max(0, Math.Min(1, value)); }
+        }
+
+        public string AlarmSoundFile {
+            get { return _alarmSoundFile; }
+            set { _alarmSoundFile = value; }
+        }
+
         public override bool Process(ref Message msg) {
-            if (!_enabled || Form.CurrentThumbnailWindowHandle == null)
+            if (!_enabled) {
+                // skip when disabled
                 return false;
+            }
+            if (Form.CurrentThumbnailWindowHandle == null) {
+                // nothing to monitor yet
+                return false;
+            }
 
             // Sample at regular intervals
             long currentTick = Environment.TickCount;
@@ -65,7 +100,8 @@ namespace OnTopReplica.MessagePumpProcessors {
                 return false;
             }
 
-            // Check for target color in the window
+            // Check for any of the target colors in the window
+            Log.Write("Performing color detection (targets={0}, tol={1})", string.Join(",", _targetColors), _colorTolerance);
             if (DetectColorInWindow(Form.CurrentThumbnailWindowHandle.Handle)) {
                 StartAlarm();
             }
@@ -127,16 +163,15 @@ namespace OnTopReplica.MessagePumpProcessors {
             if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0)
                 return false;
 
-            // Sample a grid of pixels to detect color (not every pixel for performance)
-            int stepX = Math.Max(1, bmp.Width / 20); // Sample ~20 points horizontally
-            int stepY = Math.Max(1, bmp.Height / 20); // Sample ~20 points vertically
-
-            for (int y = 0; y < bmp.Height; y += stepY) {
-                for (int x = 0; x < bmp.Width; x += stepX) {
+            // Scan every pixel for maximum reliability (bitmap is capped to 800x600 for performance)
+            for (int y = 0; y < bmp.Height; y++) {
+                for (int x = 0; x < bmp.Width; x++) {
                     Color pixelColor = bmp.GetPixel(x, y);
-                    if (IsColorMatch(pixelColor, _targetColor, _colorTolerance)) {
-                        Log.Write("Color detected at ({0}, {1})", x, y);
-                        return true;
+                    foreach (var target in _targetColors) {
+                        if (IsColorMatch(pixelColor, target, _colorTolerance)) {
+                            Log.Write("Color {2} detected at ({0}, {1})", x, y, target);
+                            return true;
+                        }
                     }
                 }
             }
@@ -165,16 +200,20 @@ namespace OnTopReplica.MessagePumpProcessors {
             _alarmActive = true;
             _alarmStartTick = Environment.TickCount;
 
-            Log.Write("Color alarm triggered!");
+            Log.Write("Color alarm triggered! volume={0}, file={1}", _alarmVolume, _alarmSoundFile);
 
             try {
-                // Play system sound (beep)
-                System.Media.SystemSounds.Beep.Play();
-                
-                // Also try to play a longer alarm tone using beep method multiple times
-                Form.BeginInvoke((Action)delegate {
-                    PlayAlarmTone();
-                });
+                // if a sound file is specified and exists, use MediaPlayer to play it
+                if (!string.IsNullOrEmpty(_alarmSoundFile) && File.Exists(_alarmSoundFile)) {
+                    if (_mediaPlayer == null) {
+                        _mediaPlayer = new System.Windows.Media.MediaPlayer();
+                    }
+                    _mediaPlayer.Open(new Uri(_alarmSoundFile));
+                    _mediaPlayer.Volume = _alarmVolume;
+                    _mediaPlayer.Play();
+                } else {
+                    System.Media.SystemSounds.Beep.Play();
+                }
             }
             catch (Exception ex) {
                 Log.Write("Error playing alarm: {0}", ex.Message);
@@ -232,12 +271,22 @@ namespace OnTopReplica.MessagePumpProcessors {
         private void StopAlarm() {
             _alarmActive = false;
             Log.Write("Color alarm stopped");
+            try {
+                if (_mediaPlayer != null) {
+                    _mediaPlayer.Stop();
+                }
+            }
+            catch { }
         }
 
         protected override void Shutdown() {
             Enabled = false;
             if (_alarmActive)
                 StopAlarm();
+            if (_mediaPlayer != null) {
+                _mediaPlayer.Close();
+                _mediaPlayer = null;
+            }
         }
     }
 }

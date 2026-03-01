@@ -9,6 +9,7 @@ Very useful for monitoring background processes, wrangling with complex multi-wi
 **📢 Features:**
 
 * Clone any of your windows and keep it *always-on-top* while working with other windows,
+* Color‑alert feature lets you monitor a target window for a chosen colour; open the **Color Alert** side panel, select a colour and check “Enable Color Detection” (settings take effect immediately).  If the monitored window contains the colour the alarm will sound for 3 seconds and an entry is written to the log.
 * Select a subregion of the cloned window, which:
   * Can be stored for future use,
   * Can use relative coordinates from the target window’s borders.
@@ -24,6 +25,17 @@ Very useful for monitoring background processes, wrangling with complex multi-wi
 * Microsoft Windows Vista or greater (the application makes use of native DWM&nbsp;Thumbnails to create replicas),
 * Microsoft .NET Framework 4.7.
 * Desktop Composition (a.k.a. Windows *Aero*) enabled.
+
+## Logging & Troubleshooting
+If the executable does not start when you double‑click it, check for a log file in your roaming data directory:
+
+```
+%AppData%\OnTopReplica\lastrun.log.txt
+```
+
+The program records startup details (version, command line, OS/CLR, current directory) and any exceptions.  A crash dump (`OnTopReplica-dump-*.txt`) is written to the desktop if an unhandled exception occurs.
+
+No log file at all usually means the process failed before the CLR loaded; verify that .NET Framework 4.7 (or later) is installed.
 
 ## Installation
 
