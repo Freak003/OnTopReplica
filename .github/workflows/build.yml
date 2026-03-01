@@ -24,7 +24,13 @@ jobs:
 
       - name: Build solution (Release)
         run: |
-          msbuild src/OnTopReplica.sln /p:Configuration=Release /m
+          echo "Locating MSBuild using vswhere..."
+          $vsPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          echo "Visual Studio folder: $vsPath"
+          $msbuildPath = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
+          echo "Using MSBuild at $msbuildPath"
+          if (-Not (Test-Path $msbuildPath)) { Write-Error "MSBuild not found at $msbuildPath"; exit 1 }
+          & "$msbuildPath" src/OnTopReplica.sln /p:Configuration=Release /m
 
       - name: List Release dir (debug)
         run: |
