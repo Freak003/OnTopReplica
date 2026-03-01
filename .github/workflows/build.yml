@@ -49,7 +49,10 @@ jobs:
         env:
           PROJECT_EXE_PATH: ${{ github.workspace }}\src\OnTopReplica\bin\Release
         run: |
-          "%ProgramFiles(x86)%\\Inno Setup 6\\ISCC.exe" Installer\\OnTopReplica.iss /DProjectExePath="%PROJECT_EXE_PATH%"
+          $inno = Join-Path $env:'ProgramFiles(x86)' 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $inno)) { Write-Error "ISCC.exe not found at $inno"; exit 1 }
+          Write-Host "Using ISCC: $inno"
+          & $inno 'Installer\OnTopReplica.iss' "/DProjectExePath=$env:PROJECT_EXE_PATH"
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
