@@ -108,14 +108,7 @@ namespace OnTopReplica.Native {
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        static extern bool GetClientRect(IntPtr hWnd, out Rectangle lpRect);
-
-        /// <summary>
-        /// Gets the client rectangle of a window.
-        /// </summary>
-        public static bool GetClientRect(IntPtr hwnd, out Rectangle rect) {
-            return GetClientRect(hwnd, out rect);
-        }
+        public static extern bool GetClientRect(IntPtr hWnd, out Rectangle lpRect);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]

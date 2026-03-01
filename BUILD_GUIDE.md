@@ -196,6 +196,32 @@ E:\clo\OnTopReplica\src\OnTopReplica\bin\Debug\OnTopReplica.exe
 
 ---
 
+## 🧰 使用 PowerShell 脚本构建
+
+仓库包含一个帮助脚本 `build.ps1`，它会自动查找可用的 MSBuild 并执行构建。使用此脚本可以避免在命令行中手动定位编译工具。
+
+```powershell
+# 运行默认 Release 构建
+powershell -ExecutionPolicy Bypass -File build.ps1 -Configuration Release
+
+# 清理并重建
+powershell -ExecutionPolicy Bypass -File build.ps1 -Configuration Release -Action Rebuild
+```
+
+脚本行为：
+
+1. 检查 `msbuild` 是否已在 PATH。
+2. 搜索常见的 Visual Studio/Build Tools 安装目录。
+3. 如果仍未找到，则尝试使用 `vswhere.exe` 查找。
+4. 如果找不到，会输出红色错误并提示使用 Chocolatey 安装 Build Tools。
+
+### 脚本故障排查
+
+- 报错 "找不到 MSBuild.exe"：请安装 Visual Studio 或 Build Tools。
+- 可以手动运行 `msbuild` 并观察输出，或将脚本输出记录到文件供分析。
+
+---
+
 ## ✅ 验证编译成功
 
 ### 检查输出文件

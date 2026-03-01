@@ -67,22 +67,45 @@ if (-not (Test-Path $solutionFile)) {
 # 查找 MSBuild
 Write-Info "正在查找 MSBuild..."
 
-$msbuildCandidates = @(
-    "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
-    "C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
-    "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
-    "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe",
-    "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe",
-    "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\MSBuild\15.0\Bin\MSBuild.exe",
-    "C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional\MSBuild\15.0\Bin\MSBuild.exe"
-)
+# 如果已经在 PATH 中，直接使用
+$cmd = Get-Command msbuild -ErrorAction SilentlyContinue
+if ($cmd) {
+    $msbuildPath = $cmd.Source
+    Write-Success "MSBuild 在 PATH 中，可执行路径：$msbuildPath"
+} else {
+    # 预定义的一些常见安装位置
+    $msbuildCandidates = @(
+        "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\MSBuild\15.0\Bin\MSBuild.exe",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional\MSBuild\15.0\Bin\MSBuild.exe"
+    )
+    foreach ($candidate in $msbuildCandidates) {
+        if (Test-Path $candidate) {
+            $msbuildPath = $candidate
+            Write-Success "找到 MSBuild: $candidate"
+            break
+        }
+    }
+}
 
-$msbuildPath = $null
-foreach ($candidate in $msbuildCandidates) {
-    if (Test-Path $candidate) {
-        $msbuildPath = $candidate
-        Write-Success "找到 MSBuild: $candidate"
-        break
+# 如果仍然没有找到，尝试使用 vswhere
+if (-not $msbuildPath) {
+    $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        Write-Info "正在通过 vswhere 查找安装路径..."
+        $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+        if ($vsPath) {
+            $possible = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
+            if (Test-Path $possible) {
+                $msbuildPath = $possible
+                Write-Success "通过 vswhere 找到 MSBuild: $msbuildPath"
+            }
+        }
     }
 }
 
