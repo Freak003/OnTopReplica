@@ -54,8 +54,14 @@ jobs:
           Write-Host "Using ISCC: $inno"
           & $inno 'Installer\OnTopReplica.iss' "/DProjectExePath=$env:PROJECT_EXE_PATH"
 
+      - name: List installer output directory
+        run: |
+          echo "Current directory: $(pwd)"
+          dir Installer
+          dir .
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: OnTopReplica-installer
-          path: OnTopReplica_Setup.exe
+          path: Installer\OnTopReplica_Setup.exe
