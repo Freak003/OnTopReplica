@@ -10,8 +10,20 @@ using OnTopReplica.Native;
 using OnTopReplica.Properties;
 
 namespace OnTopReplica.MessagePumpProcessors {
+
     /// <summary>
-    /// Monitors the cloned window for a specific color and triggers an alarm when detected.
+    /// Predefined color categories for detection.
+    /// </summary>
+    public enum ColorCategory {
+        None,
+        Red,    // 红色
+        Orange, // 橙色
+        Gray    // 灰色
+    }
+
+    /// <summary>
+    /// Monitors the cloned window for predefined color categories and triggers an alarm when detected.
+    /// Uses LockBits for fast pixel scanning to avoid blocking the UI thread.
     /// </summary>
     class ColorDetectionProcessor : BaseMessagePumpProcessor {
 
@@ -54,8 +66,7 @@ namespace OnTopReplica.MessagePumpProcessors {
         private const uint PW_CLIENTONLY = 1;
 
         private bool _enabled = false;
-        private List<Color> _targetColors = new List<Color>() { Color.Red };
-        private int _colorTolerance = 30; // Tolerance for color matching (0-255)
+        private HashSet<ColorCategory> _enabledCategories = new HashSet<ColorCategory>() { ColorCategory.Red };
         private int _sampleInterval = 500; // Sampling interval in milliseconds
         private float _alarmVolume = 1.0f; // 0.0 - 1.0
         private string _alarmSoundFile = string.Empty;
@@ -63,6 +74,7 @@ namespace OnTopReplica.MessagePumpProcessors {
         private bool _alarmActive = false;
         private long _alarmStartTick = 0;
         private const int AlarmDuration = 3000; // 3 seconds in milliseconds
+        private const int MinMatchPixels = 50; // Minimum matching pixels to trigger alarm
         private System.Windows.Media.MediaPlayer _mediaPlayer;
 
         public bool Enabled {
@@ -71,28 +83,11 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// Primary color for backwards compatibility. Setting this will clear the list and
-        /// keep only the supplied value as the single target color.
+        /// Set of color categories that should trigger the alarm when detected.
         /// </summary>
-        public Color TargetColor {
-            get { return _targetColors.Count > 0 ? _targetColors[0] : Color.Red; }
-            set {
-                _targetColors.Clear();
-                _targetColors.Add(value);
-            }
-        }
-
-        /// <summary>
-        /// List of colors that should trigger the alarm when found in the window.
-        /// </summary>
-        public List<Color> TargetColors {
-            get { return _targetColors; }
-            set { _targetColors = value ?? new List<Color>(); }
-        }
-
-        public int ColorTolerance {
-            get { return _colorTolerance; }
-            set { _colorTolerance = Math.Max(0, Math.Min(255, value)); }
+        public HashSet<ColorCategory> EnabledCategories {
+            get { return _enabledCategories; }
+            set { _enabledCategories = value ?? new HashSet<ColorCategory>(); }
         }
 
         public int SampleInterval {
@@ -116,11 +111,12 @@ namespace OnTopReplica.MessagePumpProcessors {
 
         public override bool Process(ref Message msg) {
             if (!_enabled) {
-                // skip when disabled
                 return false;
             }
             if (Form.CurrentThumbnailWindowHandle == null) {
-                // nothing to monitor yet
+                return false;
+            }
+            if (_enabledCategories.Count == 0) {
                 return false;
             }
 
@@ -139,8 +135,9 @@ namespace OnTopReplica.MessagePumpProcessors {
                 return false;
             }
 
-            // Check for any of the target colors in the window
-            Log.Write("Performing color detection (targets={0}, tol={1})", string.Join(",", _targetColors), _colorTolerance);
+            // Detect predefined color categories in the window
+            var catList = string.Join(",", _enabledCategories);
+            Log.Write("Performing color detection (categories={0})", catList);
             if (DetectColorInWindow(Form.CurrentThumbnailWindowHandle.Handle)) {
                 StartAlarm();
             }
@@ -476,87 +473,93 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// Samples bitmap pixels to find the target color.
+        /// Samples bitmap pixels using LockBits for fast access.
+        /// Classifies each pixel into a color category and triggers if enough matching pixels found.
         /// </summary>
         private bool SampleBitmapForColor(Bitmap bmp) {
             if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0)
                 return false;
 
-            // 记录最接近的颜色匹配用于调试
-            int bestDiff = int.MaxValue;
-            Color bestPixel = Color.Black;
-            Color bestTarget = Color.Black;
-            int bestX = 0, bestY = 0;
+            BitmapData data = null;
+            try {
+                data = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height),
+                    ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
 
-            // Scan every pixel for maximum reliability (bitmap is capped to 800x600 for performance)
-            for (int y = 0; y < bmp.Height; y++) {
-                for (int x = 0; x < bmp.Width; x++) {
-                    Color pixelColor = bmp.GetPixel(x, y);
-                    foreach (var target in _targetColors) {
-                        if (IsColorMatch(pixelColor, target, _colorTolerance)) {
-                            Log.Write("ColorDetection MATCH at ({0},{1}): pixel=({2},{3},{4}) target=({5},{6},{7}) diff=({8},{9},{10})",
-                                x, y,
-                                pixelColor.R, pixelColor.G, pixelColor.B,
-                                target.R, target.G, target.B,
-                                Math.Abs(pixelColor.R - target.R),
-                                Math.Abs(pixelColor.G - target.G),
-                                Math.Abs(pixelColor.B - target.B));
-                            // 检测到颜色时保存调试截图
-                            SaveDebugBitmap(bmp, "alarm_trigger");
-                            return true;
-                        }
-                        // 跟踪最接近的匹配
-                        int diff = Math.Abs(pixelColor.R - target.R) + Math.Abs(pixelColor.G - target.G) + Math.Abs(pixelColor.B - target.B);
-                        if (diff < bestDiff) {
-                            bestDiff = diff;
-                            bestPixel = pixelColor;
-                            bestTarget = target;
-                            bestX = x;
-                            bestY = y;
+                int stride = data.Stride;
+                int byteCount = stride * bmp.Height;
+                byte[] pixels = new byte[byteCount];
+                Marshal.Copy(data.Scan0, pixels, 0, byteCount);
+
+                // Count matching pixels per category
+                int matchCount = 0;
+                ColorCategory firstMatchCat = ColorCategory.None;
+                int firstX = 0, firstY = 0;
+
+                for (int y = 0; y < bmp.Height; y++) {
+                    int rowOffset = y * stride;
+                    for (int x = 0; x < bmp.Width; x++) {
+                        int idx = rowOffset + x * 4;
+                        byte b = pixels[idx];
+                        byte g = pixels[idx + 1];
+                        byte r = pixels[idx + 2];
+
+                        ColorCategory cat = ClassifyPixelColor(r, g, b);
+                        if (cat != ColorCategory.None && _enabledCategories.Contains(cat)) {
+                            matchCount++;
+                            if (matchCount == 1) {
+                                firstMatchCat = cat;
+                                firstX = x;
+                                firstY = y;
+                            }
+                            if (matchCount >= MinMatchPixels) {
+                                Log.Write("ColorDetection MATCH: {0} pixels of category {1} found (first at {2},{3} r={4},g={5},b={6}), bmpSize={7}x{8}",
+                                    matchCount, firstMatchCat, firstX, firstY,
+                                    pixels[firstY * stride + firstX * 4 + 2],
+                                    pixels[firstY * stride + firstX * 4 + 1],
+                                    pixels[firstY * stride + firstX * 4],
+                                    bmp.Width, bmp.Height);
+                                bmp.UnlockBits(data);
+                                data = null;
+                                SaveDebugBitmap(bmp, "alarm_trigger");
+                                return true;
+                            }
                         }
                     }
                 }
-            }
 
-            // 未匹配时记录最接近的颜色
-            Log.Write("ColorDetection NO MATCH: closest at ({0},{1}) pixel=({2},{3},{4}) target=({5},{6},{7}) totalDiff={8}, bmpSize={9}x{10}",
-                bestX, bestY,
-                bestPixel.R, bestPixel.G, bestPixel.B,
-                bestTarget.R, bestTarget.G, bestTarget.B,
-                bestDiff, bmp.Width, bmp.Height);
-            return false;
+                Log.Write("ColorDetection NO MATCH: only {0} matching pixels (need {1}), bmpSize={2}x{3}",
+                    matchCount, MinMatchPixels, bmp.Width, bmp.Height);
+                return false;
+            }
+            finally {
+                if (data != null) bmp.UnlockBits(data);
+            }
         }
 
         /// <summary>
-        /// Checks if two colors match within the tolerance threshold.
-        /// Uses both RGB per-channel comparison and HSV perceptual comparison.
+        /// Classifies a pixel's RGB color into a predefined color category using HSV ranges.
         /// </summary>
-        private bool IsColorMatch(Color color1, Color color2, int tolerance) {
-            // 方法1: RGB 逐通道比较（精确匹配）
-            int rDiff = Math.Abs(color1.R - color2.R);
-            int gDiff = Math.Abs(color1.G - color2.G);
-            int bDiff = Math.Abs(color1.B - color2.B);
-            if (rDiff <= tolerance && gDiff <= tolerance && bDiff <= tolerance)
-                return true;
+        private static ColorCategory ClassifyPixelColor(byte r, byte g, byte b) {
+            float h, s, v;
+            RgbToHsv(r, g, b, out h, out s, out v);
 
-            // 方法2: HSV 色相比较（感知相似性，容许不同明度/饱和度的同色系匹配）
-            float h1, s1, v1, h2, s2, v2;
-            RgbToHsv(color1.R, color1.G, color1.B, out h1, out s1, out v1);
-            RgbToHsv(color2.R, color2.G, color2.B, out h2, out s2, out v2);
+            // Red: H in [0,20] or [340,360], S >= 40%, V >= 30%
+            if (s >= 40 && v >= 30) {
+                if (h <= 20 || h >= 340) {
+                    return ColorCategory.Red;
+                }
+                // Orange: H in [20,45], S >= 40%, V >= 30%
+                if (h > 20 && h <= 45) {
+                    return ColorCategory.Orange;
+                }
+            }
 
-            // 只有两个颜色都有足够的饱和度和亮度时，色相比较才可靠
-            if (s1 < 15 || s2 < 15 || v1 < 15 || v2 < 15)
-                return false;
+            // Gray: S < 15%, V in [25,75%] (medium brightness, low saturation)
+            if (s < 15 && v >= 25 && v <= 75) {
+                return ColorCategory.Gray;
+            }
 
-            // 色相是环形的 (0-360)
-            float hueDiff = Math.Abs(h1 - h2);
-            if (hueDiff > 180) hueDiff = 360 - hueDiff;
-
-            // tolerance 映射：容差值直接作为度数和百分比
-            // tolerance=30 → H容差30°, S/V容差30%
-            float svDiff = Math.Abs(s1 - s2) + Math.Abs(v1 - v2);
-
-            return hueDiff <= tolerance && svDiff <= tolerance * 2;
+            return ColorCategory.None;
         }
 
         /// <summary>

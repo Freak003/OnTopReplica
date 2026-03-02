@@ -18,30 +18,21 @@ namespace OnTopReplica.SidePanels {
         }
 
         private void LocalizePanel() {
-            // use resource strings where possible for translation support
             groupColor.Text = Strings.ColorAlert_Title;
-            labelTargetColor.Text = Strings.ColorAlert_TargetColor;
-            labelTolerance.Text = Strings.ColorAlert_Tolerance;
             labelInterval.Text = Strings.ColorAlert_Interval;
             checkEnabled.Text = Strings.ColorAlert_Enable;
-            btnChooseColor.Text = Strings.ColorAlert_Choose;
             labelVolume.Text = Strings.ColorAlert_Volume;
             labelSoundFile.Text = Strings.ColorAlert_SoundFile;
             btnClose.Text = Strings.MenuClose;
 
-            tooltipInfo.SetToolTip(labelTolerance, Strings.ColorAlert_ToleranceTooltip);
             tooltipInfo.SetToolTip(labelInterval, Strings.ColorAlert_IntervalTooltip);
         }
 
         ColorDetectionProcessor _processor;
-        private Color _selectedColor = Color.Red;
-        private List<Color> _targetColors = new List<Color>();
-        private bool _loading = false; // prevent recursion during init
         private const string SoundsRelativePath = "Sounds";
         private const string ColorConfigFileName = "ColorAlertConfig.json";
 
         private string GetColorConfigPath() {
-            // store config in AppData\OnTopReplica subfolder for user-specific settings
             return Path.Combine(AppPaths.PrivateRoamingFolderPath, ColorConfigFileName);
         }
 
@@ -49,8 +40,6 @@ namespace OnTopReplica.SidePanels {
             base.OnFirstShown(form);
             Log.Write("ColorAlertPanel shown size {0}", this.Size);
 
-            // Get or create the color detection processor; if panel is shown before the manager is ready
-            // this may return null, so we still want the UI to function independently.
             try {
                 _processor = form.MessagePumpManager.Get<ColorDetectionProcessor>();
             }
@@ -58,46 +47,36 @@ namespace OnTopReplica.SidePanels {
                 _processor = null;
             }
 
-            // Initialize color/tolerance/interval only if processor exists (real state)
             if (_processor != null) {
                 checkEnabled.Checked = _processor.Enabled;
-                trackBarTolerance.Value = _processor.ColorTolerance;
                 numInterval.Value = _processor.SampleInterval;
             }
 
-            // 始终优先从配置文件加载颜色（用户保存的完整列表）
-            // 1) 先尝试 JSON 配置文件（最新格式）
-            LoadColorsFromFile();
-            // 2) 再尝试 Settings
-            if (_targetColors.Count == 0 && !string.IsNullOrEmpty(Settings.Default.ColorAlertTargetColors)) {
-                ParseColorsFromString(Settings.Default.ColorAlertTargetColors);
+            // Load enabled categories from config file, then Settings, then processor defaults
+            var categories = LoadCategoriesFromFile();
+            if (categories == null || categories.Count == 0) {
+                categories = ParseCategoriesFromString(Settings.Default.ColorAlertTargetColors);
             }
-            // 3) 最后从 processor 获取默认值
-            if (_targetColors.Count == 0 && _processor != null) {
-                _targetColors = new List<Color>(_processor.TargetColors);
+            if ((categories == null || categories.Count == 0) && _processor != null) {
+                categories = new HashSet<ColorCategory>(_processor.EnabledCategories);
             }
-            // 4) 兜底默认红色
-            if (_targetColors.Count == 0) {
-                _targetColors.Add(Color.Red);
+            if (categories == null || categories.Count == 0) {
+                categories = new HashSet<ColorCategory> { ColorCategory.Red };
             }
 
-            if (_targetColors.Count > 0)
-                _selectedColor = _targetColors[0];
-            UpdateColorPreview();
-            UpdateColorListText();
+            // Set checkboxes from loaded categories
+            checkRed.Checked = categories.Contains(ColorCategory.Red);
+            checkOrange.Checked = categories.Contains(ColorCategory.Orange);
+            checkGray.Checked = categories.Contains(ColorCategory.Gray);
 
-            if (_targetColors.Count > 0) {
-                var list = string.Join(",", _targetColors.Select(c => string.Format("#{0:X6}", c.ToArgb() & 0xFFFFFF)));
-                Log.Write("Loaded ColorAlert target colors: {0}", list);
+            Log.Write("Loaded ColorAlert categories: {0}", CategoriesToString(categories));
+
+            // Sync to processor
+            if (_processor != null) {
+                _processor.EnabledCategories = new HashSet<ColorCategory>(categories);
             }
 
-            // 初始化完成后立即将颜色列表同步到 processor
-            if (_processor != null && _targetColors.Count > 0) {
-                _processor.TargetColors = new List<Color>(_targetColors);
-            }
-
-            // irrespective of processor availability, load persisted volume and sound settings,
-            // and populate the dropdown so the UI shows something immediately.
+            // Load volume and sound settings
             trackBarVolume.Value = (int)(Settings.Default.ColorAlertVolume * 100);
             PopulateSoundList();
             if (!string.IsNullOrEmpty(Settings.Default.ColorAlertSoundFile)) {
@@ -105,11 +84,6 @@ namespace OnTopReplica.SidePanels {
                 if (comboSound.Items.Contains(f))
                     comboSound.SelectedItem = f;
             }
-
-            // log current control list for diagnostics
-            var names = new List<string>();
-            foreach (Control c in groupColor.Controls) names.Add(c.Name);
-            Log.Write("groupColor contains: {0}", string.Join(",", names));
         }
 
         public override string Title {
@@ -121,10 +95,10 @@ namespace OnTopReplica.SidePanels {
         public override void OnClosing(MainForm form) {
             base.OnClosing(form);
 
-            // update processor if available
+            var categories = GetEnabledCategories();
+
             if (_processor != null) {
-                _processor.TargetColors = new List<Color>(_targetColors);
-                _processor.ColorTolerance = trackBarTolerance.Value;
+                _processor.EnabledCategories = new HashSet<ColorCategory>(categories);
                 _processor.SampleInterval = (int)numInterval.Value;
                 _processor.Enabled = checkEnabled.Checked;
                 _processor.AlarmVolume = trackBarVolume.Value / 100f;
@@ -134,251 +108,150 @@ namespace OnTopReplica.SidePanels {
                 }
             }
 
-            // persist settings regardless of processor presence
+            // Persist settings
             Settings.Default.ColorAlertVolume = trackBarVolume.Value / 100f;
             if (comboSound.SelectedItem != null) {
                 string file = comboSound.SelectedItem.ToString();
                 Settings.Default.ColorAlertSoundFile = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), SoundsRelativePath, file);
             }
-            // persist color list as comma-separated hex values
-            Settings.Default.ColorAlertTargetColors = ColorsToString(_targetColors);
-            
-            // also persist to dedicated JSON file for better manageability
-            SaveColorsToFile();
-            
+            Settings.Default.ColorAlertTargetColors = CategoriesToString(categories);
+
+            SaveCategoriesToFile(categories);
             Settings.Default.Save();
         }
 
-        private void SaveColorsToFile() {
+        /// <summary>
+        /// Gets the set of enabled color categories from the UI checkboxes.
+        /// </summary>
+        private HashSet<ColorCategory> GetEnabledCategories() {
+            var cats = new HashSet<ColorCategory>();
+            if (checkRed.Checked) cats.Add(ColorCategory.Red);
+            if (checkOrange.Checked) cats.Add(ColorCategory.Orange);
+            if (checkGray.Checked) cats.Add(ColorCategory.Gray);
+            return cats;
+        }
+
+        /// <summary>
+        /// Serializes categories to a comma-separated string.
+        /// </summary>
+        private string CategoriesToString(HashSet<ColorCategory> categories) {
+            if (categories == null || categories.Count == 0) return string.Empty;
+            var parts = new List<string>();
+            foreach (var c in categories) parts.Add(c.ToString());
+            return string.Join(",", parts);
+        }
+
+        /// <summary>
+        /// Parses a comma-separated category string.
+        /// </summary>
+        private HashSet<ColorCategory> ParseCategoriesFromString(string text) {
+            var result = new HashSet<ColorCategory>();
+            if (string.IsNullOrWhiteSpace(text)) return result;
+
+            var parts = text.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts) {
+                string s = part.Trim();
+                ColorCategory cat;
+                if (Enum.TryParse(s, true, out cat) && cat != ColorCategory.None) {
+                    result.Add(cat);
+                }
+            }
+            return result;
+        }
+
+        private void SaveCategoriesToFile(HashSet<ColorCategory> categories) {
             try {
                 string path = GetColorConfigPath();
-                var json = ColorsToString(_targetColors);
-                File.WriteAllText(path, json, Encoding.UTF8);
-                Log.Write("Saved color config to {0}", path);
+                string data = CategoriesToString(categories);
+                File.WriteAllText(path, data, Encoding.UTF8);
+                Log.Write("Saved color config to {0}: {1}", path, data);
             }
             catch (Exception ex) {
                 Log.Write("Error saving color config: {0}", ex.Message);
             }
         }
 
-        private void LoadColorsFromFile() {
+        private HashSet<ColorCategory> LoadCategoriesFromFile() {
             try {
                 string path = GetColorConfigPath();
-                if (!File.Exists(path)) return;
-                string json = File.ReadAllText(path, Encoding.UTF8);
-                ParseColorsFromString(json);
-                if (_targetColors.Count > 0) {
-                    Log.Write("Loaded color config from {0}", path);
+                if (!File.Exists(path)) return null;
+                string data = File.ReadAllText(path, Encoding.UTF8);
+
+                // Try new format (comma-separated category names)
+                var result = ParseCategoriesFromString(data);
+                if (result.Count > 0) {
+                    Log.Write("Loaded color config from {0}: {1}", path, data);
+                    return result;
+                }
+
+                // Legacy format: JSON array of hex colors → map to categories
+                if (data.TrimStart().StartsWith("[")) {
+                    result = MapLegacyColorsToCategories(data);
+                    if (result.Count > 0) {
+                        Log.Write("Loaded legacy color config from {0}, mapped to: {1}", path, CategoriesToString(result));
+                        return result;
+                    }
                 }
             }
             catch (Exception ex) {
                 Log.Write("Error loading color config: {0}", ex.Message);
             }
+            return null;
         }
 
-        private void UpdateColorPreview() {
-            panelColorPreview.BackColor = _selectedColor;
-            labelColorValue.Text = string.Format("#{0:X6}", _selectedColor.ToArgb() & 0xFFFFFF);
-        }
-
-        private void UpdateColorListText() {
-            if (lstColors == null) return;
-            lstColors.BeginUpdate();
+        /// <summary>
+        /// Maps legacy hex color values to predefined categories for backwards compatibility.
+        /// </summary>
+        private HashSet<ColorCategory> MapLegacyColorsToCategories(string json) {
+            var result = new HashSet<ColorCategory>();
             try {
-                lstColors.Items.Clear();
-                foreach (var c in _targetColors) {
-                    // store Color objects in the list so owner-draw can render them
-                    lstColors.Items.Add(c);
-                }
-            }
-            finally {
-                lstColors.EndUpdate();
-            }
-        }
-
-        private string ColorsToString(List<Color> colors) {
-            // encode as simple JSON array of hex strings for forward-compatibility
-            var sb = new StringBuilder();
-            sb.Append('[');
-            for (int i = 0; i < colors.Count; i++) {
-                if (i > 0) sb.Append(',');
-                sb.Append('"');
-                sb.AppendFormat("#{0:X6}", colors[i].ToArgb() & 0xFFFFFF);
-                sb.Append('"');
-            }
-            sb.Append(']');
-            return sb.ToString();
-        }
-
-        private void ParseColorsFromString(string text) {
-            _targetColors.Clear();
-            if (string.IsNullOrWhiteSpace(text)) return;
-            string trimmed = text.Trim();
-            try {
-                // JSON array: ["#RRGGBB","#RRGGBB"]
-                if (trimmed.StartsWith("[")) {
-                    trimmed = trimmed.Trim('[', ']');
-                    var parts = trimmed.Split(new[] {','}, StringSplitOptions.RemoveEmptyEntries);
-                    foreach (var p in parts) {
-                        string s = p.Trim().Trim('"').Trim();
-                        if (s.StartsWith("#")) s = s.Substring(1);
-                        if (s.Length == 6) {
-                            int rgb = int.Parse(s, System.Globalization.NumberStyles.HexNumber);
-                            Color c = Color.FromArgb(255, (rgb>>16)&0xFF, (rgb>>8)&0xFF, rgb&0xFF);
-                            _targetColors.Add(c);
-                        }
-                    }
-                    return;
-                }
-            }
-            catch { /* fallthrough to legacy format */ }
-
-            // legacy comma/semicolon separated format
-            var partsLegacy = text.Split(new[] {',',';'}, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var part in partsLegacy) {
-                string s = part.Trim();
-                try {
+                string trimmed = json.Trim().Trim('[', ']');
+                var parts = trimmed.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var p in parts) {
+                    string s = p.Trim().Trim('"').Trim();
                     if (s.StartsWith("#")) s = s.Substring(1);
                     if (s.Length == 6) {
                         int rgb = int.Parse(s, System.Globalization.NumberStyles.HexNumber);
-                        Color c = Color.FromArgb(255, (rgb>>16)&0xFF, (rgb>>8)&0xFF, rgb&0xFF);
-                        _targetColors.Add(c);
+                        int r = (rgb >> 16) & 0xFF;
+                        int g = (rgb >> 8) & 0xFF;
+                        int b = rgb & 0xFF;
+
+                        // Simple hue-based classification
+                        float max = Math.Max(r, Math.Max(g, b)) / 255f;
+                        float min = Math.Min(r, Math.Min(g, b)) / 255f;
+                        float sat = max > 0 ? (max - min) / max * 100 : 0;
+
+                        if (sat < 15) {
+                            result.Add(ColorCategory.Gray);
+                        } else if (r > g && r > b) {
+                            // Red or orange
+                            if (g > b && g > r * 0.3f) {
+                                result.Add(ColorCategory.Orange);
+                            } else {
+                                result.Add(ColorCategory.Red);
+                            }
+                        }
                     }
                 }
-                catch { }
             }
-            if (_targetColors.Count > 0) {
-                _selectedColor = _targetColors[0];
-                UpdateColorPreview();
-            }
-        }
-
-        private void BtnChooseColor_Click(object sender, EventArgs e) {
-            using (ColorDialog dlg = new ColorDialog()) {
-                dlg.Color = _selectedColor;
-                dlg.AllowFullOpen = true;
-                
-                if (dlg.ShowDialog(this) == DialogResult.OK) {
-                    _selectedColor = dlg.Color;
-                    UpdateColorPreview();
-                    AddColorToList(_selectedColor);
-                }
-            }
-        }
-
-        private void AddColorToList(Color c) {
-            if (!_targetColors.Contains(c)) {
-                _targetColors.Add(c);
-                UpdateColorListText();
-                if (_processor != null)
-                    _processor.TargetColors = new List<Color>(_targetColors);
-                Log.Write("Added color to alert list: #{0:X6}", c.ToArgb() & 0xFFFFFF);
-            }
-        }
-
-        private void BtnAddColor_Click(object sender, EventArgs e) {
-            using (ColorDialog dlg = new ColorDialog()) {
-                dlg.Color = _selectedColor;
-                dlg.AllowFullOpen = true;
-                if (dlg.ShowDialog(this) == DialogResult.OK) {
-                    AddColorToList(dlg.Color);
-                }
-            }
-        }
-
-        private void BtnMoveUp_Click(object sender, EventArgs e) {
-            MoveSelected(-1);
-        }
-
-        private void BtnMoveDown_Click(object sender, EventArgs e) {
-            MoveSelected(1);
-        }
-
-        private void MoveSelected(int direction) {
-            if (lstColors == null) return;
-            int idx = lstColors.SelectedIndex;
-            if (idx < 0) return;
-            int newIdx = idx + direction;
-            if (newIdx < 0 || newIdx >= _targetColors.Count) return;
-            var item = _targetColors[idx];
-            _targetColors.RemoveAt(idx);
-            _targetColors.Insert(newIdx, item);
-            UpdateColorListText();
-            lstColors.SelectedIndex = newIdx;
-            if (_processor != null) _processor.TargetColors = new List<Color>(_targetColors);
-            Log.Write("Moved color #{0:X6} to index {1}", item.ToArgb() & 0xFFFFFF, newIdx);
-        }
-
-        private void BtnRemoveColor_Click(object sender, EventArgs e) {
-            if (lstColors == null) return;
-            if (lstColors.SelectedIndex < 0) return;
-            int idx = lstColors.SelectedIndex;
-            if (idx >= 0 && idx < _targetColors.Count) {
-                var removed = _targetColors[idx];
-                _targetColors.RemoveAt(idx);
-                UpdateColorListText();
-                if (_processor != null) _processor.TargetColors = new List<Color>(_targetColors);
-                Log.Write("Removed color from alert list: #{0:X6}", removed.ToArgb() & 0xFFFFFF);
-            }
-        }
-
-        private void LstColors_DrawItem(object sender, DrawItemEventArgs e) {
-            if (e.Index < 0) return;
-            e.DrawBackground();
-            var lb = sender as ListBox;
-            object item = lb.Items[e.Index];
-            Color c = Color.Empty;
-            if (item is Color) c = (Color)item;
-            else {
-                // fallback: try parse string
-                try {
-                    string s = item.ToString();
-                    if (s.StartsWith("#")) s = s.Substring(1);
-                    int rgb = int.Parse(s, System.Globalization.NumberStyles.HexNumber);
-                    c = Color.FromArgb(255, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
-                }
-                catch { c = Color.Black; }
-            }
-
-            // draw color swatch
-            Rectangle swatch = new Rectangle(e.Bounds.Left + 2, e.Bounds.Top + 2, 16, e.Bounds.Height - 4);
-            using (var brush = new SolidBrush(c)) {
-                e.Graphics.FillRectangle(brush, swatch);
-            }
-            e.Graphics.DrawRectangle(SystemPens.ControlDark, swatch);
-
-            // draw hex text
-            string hex = string.Format("#{0:X6}", c.ToArgb() & 0xFFFFFF);
-            using (var textBrush = new SolidBrush(e.ForeColor)) {
-                var textRect = new Rectangle(e.Bounds.Left + 22, e.Bounds.Top + 2, e.Bounds.Width - 24, e.Bounds.Height - 4);
-                e.Graphics.DrawString(hex, e.Font, textBrush, textRect);
-            }
-
-            e.DrawFocusRectangle();
-        }
-
-        private void TrackBarTolerance_ValueChanged(object sender, EventArgs e) {
-            labelToleranceValue.Text = trackBarTolerance.Value.ToString();
-            if (_processor != null) {
-                _processor.ColorTolerance = trackBarTolerance.Value;
-            }
-        }
-
-        private void TrackBarVolume_Scroll(object sender, EventArgs e) {
-            if (_loading) return;
-            if (_processor != null) {
-                _processor.AlarmVolume = trackBarVolume.Value / 100f;
-                Log.Write("Alarm volume set to {0}", _processor.AlarmVolume);
-            }
+            catch { }
+            return result;
         }
 
         private void CheckEnabled_CheckedChanged(object sender, EventArgs e) {
             if (_processor != null) {
                 _processor.Enabled = checkEnabled.Checked;
-                // 启用时同步所有设置到 processor
                 if (checkEnabled.Checked) {
                     SyncSettingsToProcessor();
                 }
+            }
+        }
+
+        private void CheckColor_CheckedChanged(object sender, EventArgs e) {
+            if (_processor != null) {
+                _processor.EnabledCategories = GetEnabledCategories();
+                var catList = CategoriesToString(_processor.EnabledCategories);
+                Log.Write("Color categories changed: {0}", catList);
             }
         }
 
@@ -387,17 +260,21 @@ namespace OnTopReplica.SidePanels {
         /// </summary>
         private void SyncSettingsToProcessor() {
             if (_processor == null) return;
-            _processor.TargetColors = new List<Color>(_targetColors);
-            _processor.ColorTolerance = trackBarTolerance.Value;
+            _processor.EnabledCategories = GetEnabledCategories();
             _processor.SampleInterval = (int)numInterval.Value;
             _processor.AlarmVolume = trackBarVolume.Value / 100f;
             if (comboSound.SelectedItem != null) {
                 string file = comboSound.SelectedItem.ToString();
                 _processor.AlarmSoundFile = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), SoundsRelativePath, file);
             }
-            Log.Write("SyncSettingsToProcessor: targets={0}, tol={1}", 
-                string.Join(",", _targetColors.Select(c => string.Format("#{0:X6}", c.ToArgb() & 0xFFFFFF))),
-                trackBarTolerance.Value);
+            Log.Write("SyncSettingsToProcessor: categories={0}", CategoriesToString(_processor.EnabledCategories));
+        }
+
+        private void TrackBarVolume_Scroll(object sender, EventArgs e) {
+            if (_processor != null) {
+                _processor.AlarmVolume = trackBarVolume.Value / 100f;
+                Log.Write("Alarm volume set to {0}", _processor.AlarmVolume);
+            }
         }
 
         private void BtnClose_Click(object sender, EventArgs e) {
@@ -422,18 +299,16 @@ namespace OnTopReplica.SidePanels {
             comboSound.Items.Clear();
             string dir = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), SoundsRelativePath);
             if (Directory.Exists(dir)) {
-                foreach (var ext in new[] {"*.wav", "*.mp3"}) {
+                foreach (var ext in new[] { "*.wav", "*.mp3" }) {
                     foreach (var f in Directory.GetFiles(dir, ext)) {
                         comboSound.Items.Add(Path.GetFileName(f));
                     }
                 }
             }
-            // write debug info so we can verify enumeration succeeded at runtime
             Log.Write("PopulateSoundList found {0} files", comboSound.Items.Count);
         }
 
         private void BtnTestAlarm_Click(object sender, EventArgs e) {
-            // Play alarm using current settings: selected sound file and volume
             if (comboSound.SelectedItem != null) {
                 string file = comboSound.SelectedItem.ToString();
                 string path = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), SoundsRelativePath, file);
