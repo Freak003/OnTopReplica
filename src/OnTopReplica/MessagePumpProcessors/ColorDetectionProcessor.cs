@@ -70,19 +70,43 @@ namespace OnTopReplica.MessagePumpProcessors {
         private int _sampleInterval = 500; // Sampling interval in milliseconds
         private float _alarmVolume = 1.0f; // 0.0 - 1.0
         private string _alarmSoundFile = string.Empty;
-        private long _lastSampleTick = 0;
-        private bool _alarmActive = false;
-        private long _alarmStartTick = 0;
+        private volatile bool _alarmActive = false;
+        private System.Threading.Timer _alarmStopTimer = null; // fires exactly AlarmDuration ms after alarm starts
+        private System.Threading.Thread _detectionThread = null; // background detection thread (independent of message pump)
+        private volatile bool _detectionRunning = false;
+        private System.Windows.Threading.Dispatcher _uiDispatcher = null; // captured on UI thread in Initialize()
         private const int AlarmDuration = 3000; // 3 seconds in milliseconds
-        private const int MinMatchPixels = 50;   // Minimum matching pixels to trigger alarm (legacy, kept for reference)
-        private const int BlockSize = 3;          // NxN pixel block size for shape detection; 3px fits small ~12px icons (4x4=16 blocks per icon)
-        private const int BlockMatchThreshold = 40; // % of block pixels that must match to count as a "shape block" (3x3 block: need 4/9 pixels)
-        private const int MinMatchBlocks = 3;     // Minimum shape blocks required to trigger alarm
+        // Average-color detection: thresholds for comparing average HSV against target colors
+        // These are intentionally loose because averaging many pixels produces a muted blended color
+        // --- Red ---
+        // (kept for reference but no longer used in per-pixel mode)
+        // --- Gray density threshold ---
+        // Gray triggers only when grayPixels / totalPixels >= this %, preventing scrollbar/border false alarms.
+        // Red/Orange trigger on even 1 matching pixel (colored backgrounds almost never exist).
+        private const int GrayMinDensityPct = 8; // gray pixels must be >= 8% of total region pixels
+        // Minimum absolute non-background pixel count to proceed with detection.
+        // Set to 1: any region with at least 1 valid pixel should be evaluated.
+        private const int MinNonBgPixels = 1; // absolute pixel count
         private System.Windows.Media.MediaPlayer _mediaPlayer;
+        private bool _selfTestRun = false; // Run classification self-test once on first enabled cycle
 
         public bool Enabled {
             get { return _enabled; }
-            set { _enabled = value; }
+            set {
+                bool wasDisabled = !_enabled;
+                _enabled = value;
+                // Run classification self-test once on first enable (regardless of window/region state)
+                if (value && wasDisabled && !_selfTestRun) {
+                    _selfTestRun = true;
+                    RunClassificationSelfTest();
+                }
+                // Start or stop the background detection thread
+                if (value) {
+                    StartDetectionThread();
+                } else {
+                    StopDetectionThread();
+                }
+            }
         }
 
         /// <summary>
@@ -112,40 +136,68 @@ namespace OnTopReplica.MessagePumpProcessors {
             set { _alarmSoundFile = value; }
         }
 
+        public override void Initialize(MainForm form) {
+            base.Initialize(form);
+            // Capture WPF Dispatcher on the UI thread so background threads can marshal
+            // MediaPlayer calls to the correct thread (Application.Current is null in WinForms).
+            _uiDispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        }
+
         public override bool Process(ref Message msg) {
-            if (!_enabled) {
-                return false;
-            }
-            if (Form.CurrentThumbnailWindowHandle == null) {
-                return false;
-            }
-            if (_enabledCategories.Count == 0) {
-                return false;
-            }
-
-            // Sample at regular intervals
-            long currentTick = Environment.TickCount;
-            if (currentTick - _lastSampleTick < _sampleInterval)
-                return false;
-
-            _lastSampleTick = currentTick;
-
-            // Check if we should stop the alarm
-            if (_alarmActive) {
-                if (currentTick - _alarmStartTick >= AlarmDuration) {
-                    StopAlarm();
-                }
-                return false;
-            }
-
-            // Detect predefined color categories in the window
-            var catList = string.Join(",", _enabledCategories);
-            Log.Write("Performing color detection (categories={0})", catList);
-            if (DetectColorInWindow(Form.CurrentThumbnailWindowHandle.Handle)) {
-                StartAlarm();
-            }
-
+            // Detection is handled by the background thread (_detectionThread).
+            // The message pump is no longer needed for color detection timing.
             return false;
+        }
+
+        /// <summary>
+        /// Starts the background detection thread if not already running.
+        /// </summary>
+        private void StartDetectionThread() {
+            if (_detectionThread != null && _detectionThread.IsAlive)
+                return;
+            _detectionRunning = true;
+            _detectionThread = new System.Threading.Thread(DetectionThreadLoop) {
+                IsBackground = true,
+                Name = "ColorDetection"
+            };
+            _detectionThread.Start();
+            Log.Write("ColorDetection: background thread started (interval={0}ms)", _sampleInterval);
+        }
+
+        /// <summary>
+        /// Signals the background detection thread to stop.
+        /// </summary>
+        private void StopDetectionThread() {
+            _detectionRunning = false;
+            // Thread exits on next sleep cycle — no Join needed (IsBackground=true)
+            Log.Write("ColorDetection: background thread stop requested");
+        }
+
+        /// <summary>
+        /// Background detection loop. Runs every _sampleInterval ms independent of the WinForms
+        /// message pump, so detection latency stays at ~500 ms even when a fullscreen game
+        /// (such as EVE Online) reduces message pump frequency to once per ~6 s.
+        /// </summary>
+        private void DetectionThreadLoop() {
+            while (_detectionRunning) {
+                System.Threading.Thread.Sleep(_sampleInterval);
+                if (!_detectionRunning) break;
+                if (!_enabled) break;
+                if (Form == null || Form.CurrentThumbnailWindowHandle == null) continue;
+                if (_enabledCategories.Count == 0) continue;
+                if (_alarmActive) continue;
+
+                var catList = string.Join(",", _enabledCategories);
+                Log.Write("Performing color detection (categories={0})", catList);
+                try {
+                    if (DetectColorInWindow(Form.CurrentThumbnailWindowHandle.Handle)) {
+                        StartAlarm();
+                    }
+                } catch (Exception ex) {
+                    Log.Write("ColorDetection thread error: {0}", ex.Message);
+                }
+            }
+            Log.Write("ColorDetection: background thread exited");
         }
 
         /// <summary>
@@ -476,10 +528,13 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// Detects predefined color shapes using block-based analysis.
-        /// The image is divided into BlockSize×BlockSize cells; a cell counts as a "shape block"
-        /// only when ≥BlockMatchThreshold% of its pixels belong to the same enabled category.
-        /// This filters out scattered text/gradient pixels while detecting solid color squares/icons.
+        /// Per-pixel color detection algorithm:
+        /// 1. Scan all pixels, skip white (S&lt;15 and V&gt;85), black/near-black (V&lt;15),
+        ///    and high-saturation non-target colors (blue/green icons, S&gt;=40 and not Red/Orange/Gray).
+        /// 2. Classify each remaining pixel as Red / Orange / Gray / None.
+        /// 3a. Red or Orange: if even 1 pixel matches an enabled category → alarm immediately.
+        /// 3b. Gray only (no red/orange found): grayPixels/totalPixels &gt;= GrayMinDensityPct% → alarm.
+        ///     The density guard prevents scrollbars/borders (pure gray background, ~6%) from triggering.
         /// </summary>
         private bool SampleBitmapForColor(Bitmap bmp) {
             if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0)
@@ -501,89 +556,78 @@ namespace OnTopReplica.MessagePumpProcessors {
                 bmp.UnlockBits(data);
                 data = null;
 
-                // Per-category block counts and diagnostics
-                var blockCounts = new System.Collections.Generic.Dictionary<ColorCategory, int>();
-                var blockFirstPos = new System.Collections.Generic.Dictionary<ColorCategory, string>();
-                var blockFirstRgb = new System.Collections.Generic.Dictionary<ColorCategory, string>();
+                int totalPixels = bmp.Width * bmp.Height;
+                int whiteSkipped    = 0;
+                int blackSkipped    = 0;
+                int coloredBgSkipped = 0; // high-S non-target colors (blue/green icons)
+                int redCount        = 0;
+                int orangeCount     = 0;
+                int grayCount       = 0;
+                int noneCount       = 0;
 
-                int blocksX = (bmp.Width + BlockSize - 1) / BlockSize;
-                int blocksY = (bmp.Height + BlockSize - 1) / BlockSize;
+                for (int y = 0; y < bmp.Height; y++) {
+                    int rowOffset = y * stride;
+                    for (int x = 0; x < bmp.Width; x++) {
+                        int idx = rowOffset + x * 4;
+                        byte pb = pixels[idx];      // B
+                        byte pg = pixels[idx + 1];  // G
+                        byte pr = pixels[idx + 2];  // R
 
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        int x0 = bx * BlockSize;
-                        int y0 = by * BlockSize;
-                        int x1 = Math.Min(x0 + BlockSize, bmp.Width);
-                        int y1 = Math.Min(y0 + BlockSize, bmp.Height);
+                        float h, s, v;
+                        RgbToHsv(pr, pg, pb, out h, out s, out v);
 
-                        // Count pixels per category within this block
-                        var blockCat = new System.Collections.Generic.Dictionary<ColorCategory, int>();
-                        int totalPx = 0;
+                        // Skip white: low saturation + high brightness (icon text, borders)
+                        if (s < 15 && v > 85) { whiteSkipped++; continue; }
 
-                        for (int y = y0; y < y1; y++) {
-                            int rowOffset = y * stride;
-                            for (int x = x0; x < x1; x++) {
-                                int idx = rowOffset + x * 4;
-                                byte pb = pixels[idx];
-                                byte pg = pixels[idx + 1];
-                                byte pr = pixels[idx + 2];
-                                totalPx++;
+                        // Skip black/near-black: dark UI background
+                        if (v < 15) { blackSkipped++; continue; }
 
-                                ColorCategory cat = ClassifyPixelColor(pr, pg, pb);
-                                if (cat != ColorCategory.None) {
-                                    if (!blockCat.ContainsKey(cat)) blockCat[cat] = 0;
-                                    blockCat[cat]++;
-                                }
-                            }
-                        }
+                        // Classify
+                        ColorCategory cat = ClassifyPixelColor(pr, pg, pb);
 
-                        // Check if any category dominates this block (>=threshold%)
-                        foreach (var kv in blockCat) {
-                            int pct = kv.Value * 100 / totalPx;
-                            if (pct >= BlockMatchThreshold) {
-                                // Track per-category block counts (even if not enabled, for diagnostics)
-                                if (!blockCounts.ContainsKey(kv.Key)) blockCounts[kv.Key] = 0;
-                                blockCounts[kv.Key]++;
+                        // Exclude high-S non-target colors (blue/green icons) from analysis
+                        if (cat == ColorCategory.None && s >= 40) { coloredBgSkipped++; continue; }
 
-                                if (!blockFirstPos.ContainsKey(kv.Key)) {
-                                    // Sample the representative pixel from this block for logging
-                                    int midX = (x0 + x1) / 2;
-                                    int midY = (y0 + y1) / 2;
-                                    int midIdx = midY * stride + midX * 4;
-                                    byte sb = pixels[midIdx];
-                                    byte sg = pixels[midIdx + 1];
-                                    byte sr = pixels[midIdx + 2];
-                                    float fh, fs, fv;
-                                    RgbToHsv(sr, sg, sb, out fh, out fs, out fv);
-                                    blockFirstPos[kv.Key] = string.Format("block({0},{1})", bx, by);
-                                    blockFirstRgb[kv.Key] = string.Format("rgb=({0},{1},{2}) H={3:F1} S={4:F1} V={5:F1} fill={6}%",
-                                        sr, sg, sb, fh, fs, fv, pct);
-                                }
-
-                                // If this category is enabled, check alarm condition
-                                if (_enabledCategories.Contains(kv.Key) && blockCounts[kv.Key] >= MinMatchBlocks) {
-                                    Log.Write("ColorDetection MATCH: category={0}, shapeBlocks={1}/{2} (need {3}), {4} {5}",
-                                        kv.Key, blockCounts[kv.Key], blocksX * blocksY, MinMatchBlocks,
-                                        blockFirstPos[kv.Key], blockFirstRgb[kv.Key]);
-                                    foreach (var dbg in blockCounts)
-                                        Log.Write("  -> category {0}: {1} shapeBlocks (enabled={2}) {3} {4}",
-                                            dbg.Key, dbg.Value, _enabledCategories.Contains(dbg.Key),
-                                            blockFirstPos.ContainsKey(dbg.Key) ? blockFirstPos[dbg.Key] : "",
-                                            blockFirstRgb.ContainsKey(dbg.Key) ? blockFirstRgb[dbg.Key] : "");
-                                    SaveDebugBitmap(bmp, "alarm_trigger");
-                                    return true;
-                                }
-                            }
+                        switch (cat) {
+                            case ColorCategory.Red:    redCount++;    break;
+                            case ColorCategory.Orange: orangeCount++; break;
+                            case ColorCategory.Gray:   grayCount++;   break;
+                            default:                   noneCount++;   break;
                         }
                     }
                 }
 
-                // No match — log summary
-                var summary = new System.Text.StringBuilder();
-                foreach (var kv in blockCounts)
-                    summary.AppendFormat(" {0}:{1}blocks(enabled={2})", kv.Key, kv.Value, _enabledCategories.Contains(kv.Key));
-                Log.Write("ColorDetection NO MATCH: shapeBlockSummary=[{0}], grid={1}x{2}, threshold={3}%, minBlocks={4}",
-                    summary.ToString().Trim(), blocksX, blocksY, BlockMatchThreshold, MinMatchBlocks);
+                int validPixels = redCount + orangeCount + grayCount + noneCount;
+                int grayDensityPct = totalPixels > 0 ? grayCount * 100 / totalPixels : 0;
+
+                Log.Write("ColorDetection counts: red={0} orange={1} gray={2} none={3}  total={4} white={5} black={6} coloredBg={7}",
+                    redCount, orangeCount, grayCount, noneCount, totalPixels, whiteSkipped, blackSkipped, coloredBgSkipped);
+                Log.Write("  grayDensity={0}%(need \u2265{1}% for gray alarm)", grayDensityPct, GrayMinDensityPct);
+
+                // --- Rule 1: Red or Orange — even 1 pixel triggers alarm ---
+                if (_enabledCategories.Contains(ColorCategory.Red) && redCount >= 1) {
+                    Log.Write("ColorDetection MATCH: Red, {0} pixel(s)", redCount);
+                    SaveDebugBitmap(bmp, "alarm_trigger");
+                    return true;
+                }
+                if (_enabledCategories.Contains(ColorCategory.Orange) && orangeCount >= 1) {
+                    Log.Write("ColorDetection MATCH: Orange, {0} pixel(s)", orangeCount);
+                    SaveDebugBitmap(bmp, "alarm_trigger");
+                    return true;
+                }
+
+                // --- Rule 2: Gray — only if density >= GrayMinDensityPct% ---
+                if (_enabledCategories.Contains(ColorCategory.Gray)) {
+                    if (grayDensityPct >= GrayMinDensityPct) {
+                        Log.Write("ColorDetection MATCH: Gray, {0}px density={1}%", grayCount, grayDensityPct);
+                        SaveDebugBitmap(bmp, "alarm_trigger");
+                        return true;
+                    } else {
+                        Log.Write("ColorDetection no-Gray: {0}px density={1}% < {2}%", grayCount, grayDensityPct, GrayMinDensityPct);
+                    }
+                }
+
+                Log.Write("ColorDetection NO MATCH");
                 return false;
             }
             finally {
@@ -593,29 +637,30 @@ namespace OnTopReplica.MessagePumpProcessors {
 
         /// <summary>
         /// Classifies a pixel's RGB color into a predefined color category using HSV ranges.
-        /// Red:    H in [0,12] or [348,360], S >= 50%, V >= 30%  (pure red only)
-        /// Orange: H in (12,50],              S >= 50%, V >= 30%  (red-orange to orange)
-        /// Gray:   S < 15%, V in [20,50%]
+        /// Red:    H in [0,15] or [345,360], S >= 40%, V >= 25%  (red icons with dark edges)
+        /// Orange: H in (15,55],              S >= 40%, V >= 25%  (orange icons with dark edges)
+        /// Gray:   S < 20%, V in [15,75%]   (gray icons, broad range to cover dark→medium gray)
+        /// White/black pixels should be pre-filtered before calling this.
         /// </summary>
         private static ColorCategory ClassifyPixelColor(byte r, byte g, byte b) {
             float h, s, v;
             RgbToHsv(r, g, b, out h, out s, out v);
 
-            if (s >= 50 && v >= 30) {
-                // Pure red: hue very close to 0°
-                if (h <= 12 || h >= 348) {
+            // Red: hue near 0° with decent saturation
+            if (s >= 40 && v >= 25) {
+                if (h <= 15 || h >= 345) {
                     return ColorCategory.Red;
                 }
-                // Orange: hue from reddish-orange to orange
-                if (h > 12 && h <= 50) {
+                // Orange: hue from reddish-orange to yellow-orange
+                if (h > 15 && h <= 55) {
                     return ColorCategory.Orange;
                 }
             }
 
-            // Gray: low saturation, dark only (20%-50%)
-            // Target: dark gray offline icons V≈22-26% (rgb≈57-67)
-            // Excluded: light gray/white elements V≈75% (e.g. star icons in blue buttons)
-            if (s < 15 && v >= 20 && v <= 50) {
+            // Gray: low saturation, covers dark gray (V≈15%) to light gray (V≈83%)
+            // White (V>85, S<15) and black (V<15) are pre-filtered in the scan loop.
+            // S<25 allows slight rendering tint on gray icon backgrounds while excluding beige/warm tones (S≥25)
+            if (s < 25 && v >= 15 && v <= 83) {
                 return ColorCategory.Gray;
             }
 
@@ -651,32 +696,46 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// Starts the alarm.
+        /// Starts the alarm. Called from the background detection thread — all UI/WPF operations
+        /// are dispatched to the WPF dispatcher to ensure thread safety.
         /// </summary>
         private void StartAlarm() {
             if (_alarmActive)
                 return;
 
             _alarmActive = true;
-            _alarmStartTick = Environment.TickCount;
+
+            // Schedule automatic stop after AlarmDuration ms.
+            // Independent of both the message pump and the detection thread.
+            _alarmStopTimer?.Dispose();
+            _alarmStopTimer = new System.Threading.Timer(_ => StopAlarm(), null, AlarmDuration, System.Threading.Timeout.Infinite);
 
             Log.Write("Color alarm triggered! volume={0}, file={1}", _alarmVolume, _alarmSoundFile);
 
-            try {
-                // if a sound file is specified and exists, use MediaPlayer to play it
-                if (!string.IsNullOrEmpty(_alarmSoundFile) && File.Exists(_alarmSoundFile)) {
-                    if (_mediaPlayer == null) {
-                        _mediaPlayer = new System.Windows.Media.MediaPlayer();
-                    }
-                    _mediaPlayer.Open(new Uri(_alarmSoundFile));
-                    _mediaPlayer.Volume = _alarmVolume;
-                    _mediaPlayer.Play();
+            // MediaPlayer must be created/used on a thread with a WPF Dispatcher.
+            // _uiDispatcher was captured in Initialize() on the UI thread.
+            if (!string.IsNullOrEmpty(_alarmSoundFile) && File.Exists(_alarmSoundFile)) {
+                var soundFile = _alarmSoundFile;
+                var volume = _alarmVolume;
+                if (_uiDispatcher != null) {
+                    _uiDispatcher.BeginInvoke((Action)(() => {
+                        try {
+                            if (_mediaPlayer == null)
+                                _mediaPlayer = new System.Windows.Media.MediaPlayer();
+                            _mediaPlayer.Open(new Uri(soundFile));
+                            _mediaPlayer.Volume = volume;
+                            _mediaPlayer.Play();
+                            Log.Write("MediaPlayer.Play() called for {0}", soundFile);
+                        } catch (Exception ex) {
+                            Log.Write("Error playing alarm: {0}", ex.Message);
+                        }
+                    }));
                 } else {
+                    Log.Write("Warning: _uiDispatcher is null, cannot play sound");
                     System.Media.SystemSounds.Beep.Play();
                 }
-            }
-            catch (Exception ex) {
-                Log.Write("Error playing alarm: {0}", ex.Message);
+            } else {
+                System.Media.SystemSounds.Beep.Play();
             }
         }
 
@@ -730,21 +789,84 @@ namespace OnTopReplica.MessagePumpProcessors {
         /// </summary>
         private void StopAlarm() {
             _alarmActive = false;
+            _alarmStopTimer?.Dispose();
+            _alarmStopTimer = null;
             Log.Write("Color alarm stopped");
             try {
-                if (_mediaPlayer != null) {
-                    _mediaPlayer.Stop();
+                if (_mediaPlayer != null && _uiDispatcher != null) {
+                    _uiDispatcher.BeginInvoke((Action)(() => {
+                        try { _mediaPlayer?.Stop(); } catch { }
+                    }));
                 }
             }
             catch { }
         }
 
+        /// <summary>
+        /// Runs classification self-tests on startup to verify color detection logic.
+        /// Results are written to the log for inspection.
+        /// </summary>
+        private void RunClassificationSelfTest() {
+            Log.Write("=== ColorDetection Self-Test BEGIN ===");
+            Log.Write("  Algorithm: per-pixel  Red/Orange>=1px→alarm  Gray>=density{0}%→alarm", GrayMinDensityPct);
+            Log.Write("  White skip: S<15 && V>85, Black skip: V<15, MinNonBgPixels={0}", MinNonBgPixels);
+            // Format: (label, R, G, B, expected category)
+            var tests = new[] {
+                // --- Red (icon body, various shades including dark edges) ---
+                new { Label="Red icon body",  R=(byte)180, G=(byte)30,  B=(byte)30,  Expect=ColorCategory.Red    },
+                new { Label="Deep red edge",  R=(byte)140, G=(byte)20,  B=(byte)20,  Expect=ColorCategory.Red    },
+                new { Label="Bright red",     R=(byte)255, G=(byte)20,  B=(byte)10,  Expect=ColorCategory.Red    },
+                new { Label="Dark red V=25",  R=(byte)64,  G=(byte)10,  B=(byte)10,  Expect=ColorCategory.Red    },
+                // --- Orange (icon body, with dark border shades) ---
+                new { Label="Orange body",    R=(byte)200, G=(byte)120, B=(byte)40,  Expect=ColorCategory.Orange },
+                new { Label="Bright orange",  R=(byte)255, G=(byte)140, B=(byte)0,   Expect=ColorCategory.Orange },
+                new { Label="Dark orange",    R=(byte)160, G=(byte)80,  B=(byte)20,  Expect=ColorCategory.Orange },
+                new { Label="Yellow-orange",  R=(byte)255, G=(byte)180, B=(byte)0,   Expect=ColorCategory.Orange },
+                // --- Gray (icon body, dark to medium gray) ---
+                new { Label="Dark gray V=24", R=(byte)60,  G=(byte)60,  B=(byte)60,  Expect=ColorCategory.Gray   },
+                new { Label="Med gray V=50",  R=(byte)128, G=(byte)128, B=(byte)128, Expect=ColorCategory.Gray   },
+                new { Label="Gray V=70",      R=(byte)178, G=(byte)178, B=(byte)178, Expect=ColorCategory.Gray   },
+                new { Label="Gray V=15",      R=(byte)39,  G=(byte)39,  B=(byte)39,  Expect=ColorCategory.Gray   },
+                new { Label="Gray V=80 light",R=(byte)204, G=(byte)204, B=(byte)204, Expect=ColorCategory.Gray   },
+                // --- Should NOT match (None) ---
+                new { Label="Green H=120",    R=(byte)0,   G=(byte)200, B=(byte)0,   Expect=ColorCategory.None   },
+                new { Label="Blue H=240",     R=(byte)0,   G=(byte)0,   B=(byte)200, Expect=ColorCategory.None   },
+                new { Label="Yellow H=60",    R=(byte)255, G=(byte)255, B=(byte)0,   Expect=ColorCategory.None   },
+                // --- White/Black: these would be pre-filtered in scan, but classify as None ---
+                new { Label="White (skip)",   R=(byte)255, G=(byte)255, B=(byte)255, Expect=ColorCategory.None   },
+                new { Label="Black (skip)",   R=(byte)0,   G=(byte)0,   B=(byte)0,   Expect=ColorCategory.None   },
+                // --- Boundary / edge cases ---
+                new { Label="Gray V=76 now ok",R=(byte)194, G=(byte)194, B=(byte)194, Expect=ColorCategory.Gray   },
+                new { Label="Gray V=84 above",R=(byte)215, G=(byte)215, B=(byte)215, Expect=ColorCategory.None   },
+                new { Label="Gray V=14 below",R=(byte)35,  G=(byte)35,  B=(byte)35,  Expect=ColorCategory.None   },
+                new { Label="Low-sat orange", R=(byte)200, G=(byte)180, B=(byte)150, Expect=ColorCategory.None   },
+            };
+
+            int pass = 0, fail = 0;
+            foreach (var t in tests) {
+                var got = ClassifyPixelColor(t.R, t.G, t.B);
+                float h, s, v;
+                RgbToHsv(t.R, t.G, t.B, out h, out s, out v);
+                bool ok = got == t.Expect;
+                if (ok) pass++;
+                else fail++;
+                Log.Write("  [{0}] {1}: rgb=({2},{3},{4}) H={5:F0} S={6:F0}% V={7:F1}% → got={8} expect={9}",
+                    ok ? "PASS" : "FAIL", t.Label, t.R, t.G, t.B, h, s, v, got, t.Expect);
+            }
+            Log.Write("=== ColorDetection Self-Test END: {0} passed, {1} FAILED ===", pass, fail);
+        }
+
         protected override void Shutdown() {
+            StopDetectionThread();
             Enabled = false;
             if (_alarmActive)
                 StopAlarm();
-            if (_mediaPlayer != null) {
-                _mediaPlayer.Close();
+            if (_mediaPlayer != null && _uiDispatcher != null) {
+                try {
+                    _uiDispatcher.Invoke((Action)(() => {
+                        try { _mediaPlayer?.Close(); } catch { }
+                    }));
+                } catch { }
                 _mediaPlayer = null;
             }
         }
