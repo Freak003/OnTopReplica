@@ -75,8 +75,8 @@ namespace OnTopReplica.MessagePumpProcessors {
         private long _alarmStartTick = 0;
         private const int AlarmDuration = 3000; // 3 seconds in milliseconds
         private const int MinMatchPixels = 50;   // Minimum matching pixels to trigger alarm (legacy, kept for reference)
-        private const int BlockSize = 5;          // NxN pixel block size for shape detection (smaller = better for small icons)
-        private const int BlockMatchThreshold = 50; // % of block pixels that must match to count as a "shape block"
+        private const int BlockSize = 3;          // NxN pixel block size for shape detection; 3px fits small ~12px icons (4x4=16 blocks per icon)
+        private const int BlockMatchThreshold = 40; // % of block pixels that must match to count as a "shape block" (3x3 block: need 4/9 pixels)
         private const int MinMatchBlocks = 3;     // Minimum shape blocks required to trigger alarm
         private System.Windows.Media.MediaPlayer _mediaPlayer;
 
