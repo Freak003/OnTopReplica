@@ -262,6 +262,7 @@ namespace OnTopReplica.SidePanels {
         }
 
         private void CheckEnabled_CheckedChanged(object sender, EventArgs e) {
+            if (_loading) return; // suppress during panel initialization
             if (_processor != null) {
                 _processor.Enabled = checkEnabled.Checked;
                 if (checkEnabled.Checked) {
