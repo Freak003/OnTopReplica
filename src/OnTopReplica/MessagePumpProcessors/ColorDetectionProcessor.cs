@@ -299,6 +299,7 @@ namespace OnTopReplica.MessagePumpProcessors {
 
         /// <summary>
         /// CopyFromScreen fallback when PrintWindow fails.
+        /// Temporarily hides OnTopReplica window to avoid capturing the overlay.
         /// </summary>
         private bool DetectColorFallback(IntPtr windowHandle, Rectangle regionRect)
         {
@@ -311,18 +312,55 @@ namespace OnTopReplica.MessagePumpProcessors {
             int maxW = Math.Min(scrRect.Width, 800);
             int maxH = Math.Min(scrRect.Height, 600);
 
+            // 获取主窗体，截屏前临时隐藏以避免捕获覆盖层
+            MainForm mainForm = null;
+            foreach (Form form in Application.OpenForms)
+            {
+                if (form is MainForm mf)
+                {
+                    mainForm = mf;
+                    break;
+                }
+            }
+
+            double savedOpacity = 1.0;
+            bool wasHidden = false;
             Bitmap bmp = null;
             try
             {
+                // 临时将 OnTopReplica 窗口透明度设为 0，使其对截屏不可见
+                if (mainForm != null)
+                {
+                    savedOpacity = mainForm.Opacity;
+                    mainForm.Opacity = 0;
+                    // 等待 DWM 合成器更新（需要足够时间让窗口从屏幕消失）
+                    System.Threading.Thread.Sleep(80);
+                    wasHidden = true;
+                    Log.Write("ColorDetection Fallback: Temporarily hidden OnTopReplica (opacity 0)");
+                }
+
                 bmp = new Bitmap(maxW, maxH, PixelFormat.Format32bppArgb);
                 using (Graphics g = Graphics.FromImage(bmp))
                 {
                     g.CopyFromScreen(scrRect.X, scrRect.Y, 0, 0, new Size(maxW, maxH));
                 }
+
+                // 保存调试截图
+                _debugCounter++;
+                if (_debugCounter % 20 == 1)
+                {
+                    SaveDebugBitmap(bmp, "fallback_capture");
+                }
+
                 return SampleBitmapForColor(bmp);
             }
             finally
             {
+                // 恢复窗口透明度
+                if (wasHidden && mainForm != null)
+                {
+                    mainForm.Opacity = savedOpacity;
+                }
                 if (bmp != null)
                     bmp.Dispose();
             }
