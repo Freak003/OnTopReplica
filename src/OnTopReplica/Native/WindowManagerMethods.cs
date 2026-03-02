@@ -112,7 +112,7 @@ namespace OnTopReplica.Native {
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        static extern bool GetWindowRect(IntPtr hWnd, out Rectangle lpRect);
+        public static extern bool GetWindowRect(IntPtr hWnd, out Rectangle lpRect);
 
         /// <summary>
         /// Converts a client rectangle to screen coordinates.
