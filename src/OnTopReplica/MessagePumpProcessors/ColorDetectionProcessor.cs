@@ -612,8 +612,9 @@ namespace OnTopReplica.MessagePumpProcessors {
                 }
             }
 
-            // Gray: low saturation, mid-range brightness (25%-70%), excludes near-white)
-            if (s < 15 && v >= 25 && v <= 70) {
+            // Gray: low saturation, mid-range to light brightness (25%-78%)
+            // Game gray icons are typically ~V=75% (e.g. rgb=192,192,192)
+            if (s < 15 && v >= 25 && v <= 78) {
                 return ColorCategory.Gray;
             }
 
