@@ -538,23 +538,26 @@ namespace OnTopReplica.MessagePumpProcessors {
 
         /// <summary>
         /// Classifies a pixel's RGB color into a predefined color category using HSV ranges.
+        /// Red:    H in [0,12] or [348,360], S >= 50%, V >= 30%  (pure red only)
+        /// Orange: H in (12,50],              S >= 50%, V >= 30%  (red-orange to orange)
+        /// Gray:   S < 15%, V in [25,75%]
         /// </summary>
         private static ColorCategory ClassifyPixelColor(byte r, byte g, byte b) {
             float h, s, v;
             RgbToHsv(r, g, b, out h, out s, out v);
 
-            // Red: H in [0,20] or [340,360], S >= 40%, V >= 30%
-            if (s >= 40 && v >= 30) {
-                if (h <= 20 || h >= 340) {
+            if (s >= 50 && v >= 30) {
+                // Pure red: hue very close to 0°
+                if (h <= 12 || h >= 348) {
                     return ColorCategory.Red;
                 }
-                // Orange: H in [20,45], S >= 40%, V >= 30%
-                if (h > 20 && h <= 45) {
+                // Orange: hue from reddish-orange to orange
+                if (h > 12 && h <= 50) {
                     return ColorCategory.Orange;
                 }
             }
 
-            // Gray: S < 15%, V in [25,75%] (medium brightness, low saturation)
+            // Gray: low saturation, mid-range brightness
             if (s < 15 && v >= 25 && v <= 75) {
                 return ColorCategory.Gray;
             }
