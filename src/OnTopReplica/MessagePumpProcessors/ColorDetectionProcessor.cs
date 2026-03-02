@@ -440,24 +440,32 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// Checks if a bitmap is entirely black (indicating failed capture).
-        /// Samples a few pixels for speed.
+        /// Checks if a bitmap is nearly black (indicating failed capture from hardware-rendered window).
+        /// A pixel is considered "black" if all channels are &lt;= threshold.
+        /// Returns true if more than 95% of sampled pixels are near-black.
         /// </summary>
         private bool IsBitmapAllBlack(Bitmap bmp)
         {
             if (bmp == null) return true;
-            int stepX = Math.Max(1, bmp.Width / 8);
-            int stepY = Math.Max(1, bmp.Height / 8);
+            const int threshold = 15; // 硬件渲染窗口 BitBlt 可能返回 (3,3,3) 等近黑像素
+            int stepX = Math.Max(1, bmp.Width / 10);
+            int stepY = Math.Max(1, bmp.Height / 10);
+            int totalSamples = 0;
+            int blackSamples = 0;
             for (int y = 0; y < bmp.Height; y += stepY)
             {
                 for (int x = 0; x < bmp.Width; x += stepX)
                 {
                     Color c = bmp.GetPixel(x, y);
-                    if (c.R > 2 || c.G > 2 || c.B > 2)
-                        return false;
+                    totalSamples++;
+                    if (c.R <= threshold && c.G <= threshold && c.B <= threshold)
+                        blackSamples++;
                 }
             }
-            return true;
+            bool result = totalSamples > 0 && (blackSamples * 100 / totalSamples) >= 95;
+            if (result)
+                Log.Write("ColorDetection: IsBitmapAllBlack=true ({0}/{1} samples near-black, threshold={2})", blackSamples, totalSamples, threshold);
+            return result;
         }
 
         /// <summary>
