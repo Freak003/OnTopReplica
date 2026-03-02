@@ -595,7 +595,7 @@ namespace OnTopReplica.MessagePumpProcessors {
         /// Classifies a pixel's RGB color into a predefined color category using HSV ranges.
         /// Red:    H in [0,12] or [348,360], S >= 50%, V >= 30%  (pure red only)
         /// Orange: H in (12,50],              S >= 50%, V >= 30%  (red-orange to orange)
-        /// Gray:   S < 15%, V in [25,75%]
+        /// Gray:   S < 15%, V in [20,78%]
         /// </summary>
         private static ColorCategory ClassifyPixelColor(byte r, byte g, byte b) {
             float h, s, v;
@@ -612,9 +612,9 @@ namespace OnTopReplica.MessagePumpProcessors {
                 }
             }
 
-            // Gray: low saturation, mid-range to light brightness (25%-78%)
-            // Game gray icons are typically ~V=75% (e.g. rgb=192,192,192)
-            if (s < 15 && v >= 25 && v <= 78) {
+            // Gray: low saturation, mid-range to light brightness (20%-78%)
+            // Game gray icons range from dark gray ~V=24% (rgb≈61) to light ~V=75% (rgb≈192)
+            if (s < 15 && v >= 20 && v <= 78) {
                 return ColorCategory.Gray;
             }
 
