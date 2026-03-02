@@ -74,7 +74,10 @@ namespace OnTopReplica.MessagePumpProcessors {
         private bool _alarmActive = false;
         private long _alarmStartTick = 0;
         private const int AlarmDuration = 3000; // 3 seconds in milliseconds
-        private const int MinMatchPixels = 50; // Minimum matching pixels to trigger alarm
+        private const int MinMatchPixels = 50;   // Minimum matching pixels to trigger alarm (legacy, kept for reference)
+        private const int BlockSize = 8;          // NxN pixel block size for shape detection
+        private const int BlockMatchThreshold = 60; // % of block pixels that must match to count as a "shape block"
+        private const int MinMatchBlocks = 2;     // Minimum shape blocks required to trigger alarm
         private System.Windows.Media.MediaPlayer _mediaPlayer;
 
         public bool Enabled {
@@ -473,12 +476,17 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// Samples bitmap pixels using LockBits for fast access.
-        /// Classifies each pixel into a color category and triggers if enough matching pixels found.
+        /// Detects predefined color shapes using block-based analysis.
+        /// The image is divided into BlockSize×BlockSize cells; a cell counts as a "shape block"
+        /// only when ≥BlockMatchThreshold% of its pixels belong to the same enabled category.
+        /// This filters out scattered text/gradient pixels while detecting solid color squares/icons.
         /// </summary>
         private bool SampleBitmapForColor(Bitmap bmp) {
             if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0)
                 return false;
+
+            Log.Write("ColorDetection Scan: enabledCategories=[{0}], bmpSize={1}x{2}",
+                string.Join(",", _enabledCategories), bmp.Width, bmp.Height);
 
             BitmapData data = null;
             try {
@@ -490,45 +498,92 @@ namespace OnTopReplica.MessagePumpProcessors {
                 byte[] pixels = new byte[byteCount];
                 Marshal.Copy(data.Scan0, pixels, 0, byteCount);
 
-                // Count matching pixels per category
-                int matchCount = 0;
-                ColorCategory firstMatchCat = ColorCategory.None;
-                int firstX = 0, firstY = 0;
+                bmp.UnlockBits(data);
+                data = null;
 
-                for (int y = 0; y < bmp.Height; y++) {
-                    int rowOffset = y * stride;
-                    for (int x = 0; x < bmp.Width; x++) {
-                        int idx = rowOffset + x * 4;
-                        byte b = pixels[idx];
-                        byte g = pixels[idx + 1];
-                        byte r = pixels[idx + 2];
+                // Per-category block counts and diagnostics
+                var blockCounts = new System.Collections.Generic.Dictionary<ColorCategory, int>();
+                var blockFirstPos = new System.Collections.Generic.Dictionary<ColorCategory, string>();
+                var blockFirstRgb = new System.Collections.Generic.Dictionary<ColorCategory, string>();
 
-                        ColorCategory cat = ClassifyPixelColor(r, g, b);
-                        if (cat != ColorCategory.None && _enabledCategories.Contains(cat)) {
-                            matchCount++;
-                            if (matchCount == 1) {
-                                firstMatchCat = cat;
-                                firstX = x;
-                                firstY = y;
+                int blocksX = (bmp.Width + BlockSize - 1) / BlockSize;
+                int blocksY = (bmp.Height + BlockSize - 1) / BlockSize;
+
+                for (int by = 0; by < blocksY; by++) {
+                    for (int bx = 0; bx < blocksX; bx++) {
+                        int x0 = bx * BlockSize;
+                        int y0 = by * BlockSize;
+                        int x1 = Math.Min(x0 + BlockSize, bmp.Width);
+                        int y1 = Math.Min(y0 + BlockSize, bmp.Height);
+
+                        // Count pixels per category within this block
+                        var blockCat = new System.Collections.Generic.Dictionary<ColorCategory, int>();
+                        int totalPx = 0;
+
+                        for (int y = y0; y < y1; y++) {
+                            int rowOffset = y * stride;
+                            for (int x = x0; x < x1; x++) {
+                                int idx = rowOffset + x * 4;
+                                byte pb = pixels[idx];
+                                byte pg = pixels[idx + 1];
+                                byte pr = pixels[idx + 2];
+                                totalPx++;
+
+                                ColorCategory cat = ClassifyPixelColor(pr, pg, pb);
+                                if (cat != ColorCategory.None) {
+                                    if (!blockCat.ContainsKey(cat)) blockCat[cat] = 0;
+                                    blockCat[cat]++;
+                                }
                             }
-                            if (matchCount >= MinMatchPixels) {
-                                Log.Write("ColorDetection MATCH: {0} pixels of category {1} found (first at {2},{3} r={4},g={5},b={6}), bmpSize={7}x{8}",
-                                    matchCount, firstMatchCat, firstX, firstY,
-                                    pixels[firstY * stride + firstX * 4 + 2],
-                                    pixels[firstY * stride + firstX * 4 + 1],
-                                    pixels[firstY * stride + firstX * 4],
-                                    bmp.Width, bmp.Height);
-                                bmp.UnlockBits(data);
-                                data = null;
-                                SaveDebugBitmap(bmp, "alarm_trigger");
-                                return true;
+                        }
+
+                        // Check if any category dominates this block (>=threshold%)
+                        foreach (var kv in blockCat) {
+                            int pct = kv.Value * 100 / totalPx;
+                            if (pct >= BlockMatchThreshold) {
+                                // Track per-category block counts (even if not enabled, for diagnostics)
+                                if (!blockCounts.ContainsKey(kv.Key)) blockCounts[kv.Key] = 0;
+                                blockCounts[kv.Key]++;
+
+                                if (!blockFirstPos.ContainsKey(kv.Key)) {
+                                    // Sample the representative pixel from this block for logging
+                                    int midX = (x0 + x1) / 2;
+                                    int midY = (y0 + y1) / 2;
+                                    int midIdx = midY * stride + midX * 4;
+                                    byte sb = pixels[midIdx];
+                                    byte sg = pixels[midIdx + 1];
+                                    byte sr = pixels[midIdx + 2];
+                                    float fh, fs, fv;
+                                    RgbToHsv(sr, sg, sb, out fh, out fs, out fv);
+                                    blockFirstPos[kv.Key] = string.Format("block({0},{1})", bx, by);
+                                    blockFirstRgb[kv.Key] = string.Format("rgb=({0},{1},{2}) H={3:F1} S={4:F1} V={5:F1} fill={6}%",
+                                        sr, sg, sb, fh, fs, fv, pct);
+                                }
+
+                                // If this category is enabled, check alarm condition
+                                if (_enabledCategories.Contains(kv.Key) && blockCounts[kv.Key] >= MinMatchBlocks) {
+                                    Log.Write("ColorDetection MATCH: category={0}, shapeBlocks={1}/{2} (need {3}), {4} {5}",
+                                        kv.Key, blockCounts[kv.Key], blocksX * blocksY, MinMatchBlocks,
+                                        blockFirstPos[kv.Key], blockFirstRgb[kv.Key]);
+                                    foreach (var dbg in blockCounts)
+                                        Log.Write("  -> category {0}: {1} shapeBlocks (enabled={2}) {3} {4}",
+                                            dbg.Key, dbg.Value, _enabledCategories.Contains(dbg.Key),
+                                            blockFirstPos.ContainsKey(dbg.Key) ? blockFirstPos[dbg.Key] : "",
+                                            blockFirstRgb.ContainsKey(dbg.Key) ? blockFirstRgb[dbg.Key] : "");
+                                    SaveDebugBitmap(bmp, "alarm_trigger");
+                                    return true;
+                                }
                             }
                         }
                     }
                 }
 
-                Log.Write("ColorDetection NO MATCH: only {0} matching pixels (need {1}), bmpSize={2}x{3}",
-                    matchCount, MinMatchPixels, bmp.Width, bmp.Height);
+                // No match — log summary
+                var summary = new System.Text.StringBuilder();
+                foreach (var kv in blockCounts)
+                    summary.AppendFormat(" {0}:{1}blocks(enabled={2})", kv.Key, kv.Value, _enabledCategories.Contains(kv.Key));
+                Log.Write("ColorDetection NO MATCH: shapeBlockSummary=[{0}], grid={1}x{2}, threshold={3}%, minBlocks={4}",
+                    summary.ToString().Trim(), blocksX, blocksY, BlockMatchThreshold, MinMatchBlocks);
                 return false;
             }
             finally {
