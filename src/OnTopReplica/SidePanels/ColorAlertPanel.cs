@@ -29,6 +29,7 @@ namespace OnTopReplica.SidePanels {
         }
 
         ColorDetectionProcessor _processor;
+        private bool _loading = false; // suppress CheckColor_CheckedChanged during panel init
         private const string SoundsRelativePath = "Sounds";
         private const string ColorConfigFileName = "ColorAlertConfig.json";
 
@@ -47,33 +48,55 @@ namespace OnTopReplica.SidePanels {
                 _processor = null;
             }
 
-            if (_processor != null) {
-                checkEnabled.Checked = _processor.Enabled;
-                numInterval.Value = _processor.SampleInterval;
-            }
+            _loading = true;
+            try {
+                if (_processor != null) {
+                    checkEnabled.Checked = _processor.Enabled;
+                    numInterval.Value = _processor.SampleInterval;
+                }
 
-            // Load enabled categories from config file, then Settings, then processor defaults
-            var categories = LoadCategoriesFromFile();
-            if (categories == null || categories.Count == 0) {
-                categories = ParseCategoriesFromString(Settings.Default.ColorAlertTargetColors);
-            }
-            if ((categories == null || categories.Count == 0) && _processor != null) {
-                categories = new HashSet<ColorCategory>(_processor.EnabledCategories);
-            }
-            if (categories == null || categories.Count == 0) {
-                categories = new HashSet<ColorCategory> { ColorCategory.Red };
-            }
+                // Priority: 1) processor current session state  2) config file  3) Settings  4) default Red
+                HashSet<ColorCategory> categories = null;
 
-            // Set checkboxes from loaded categories
-            checkRed.Checked = categories.Contains(ColorCategory.Red);
-            checkOrange.Checked = categories.Contains(ColorCategory.Orange);
-            checkGray.Checked = categories.Contains(ColorCategory.Gray);
+                // Use processor's current categories if it has been configured this session
+                // (detected by: processor is non-null and has categories different from factory default,
+                //  OR processor is currently enabled — meaning user has actively used it)
+                bool processorHasSessionState = _processor != null &&
+                    (_processor.Enabled || _processor.EnabledCategories.Count != 1 ||
+                    !_processor.EnabledCategories.Contains(ColorCategory.Red));
 
-            Log.Write("Loaded ColorAlert categories: {0}", CategoriesToString(categories));
+                if (processorHasSessionState) {
+                    categories = new HashSet<ColorCategory>(_processor.EnabledCategories);
+                    Log.Write("Loaded ColorAlert categories from processor: {0}", CategoriesToString(categories));
+                }
 
-            // Sync to processor
-            if (_processor != null) {
-                _processor.EnabledCategories = new HashSet<ColorCategory>(categories);
+                if (categories == null || categories.Count == 0) {
+                    categories = LoadCategoriesFromFile();
+                }
+                if (categories == null || categories.Count == 0) {
+                    categories = ParseCategoriesFromString(Settings.Default.ColorAlertTargetColors);
+                }
+                if ((categories == null || categories.Count == 0) && _processor != null) {
+                    categories = new HashSet<ColorCategory>(_processor.EnabledCategories);
+                }
+                if (categories == null || categories.Count == 0) {
+                    categories = new HashSet<ColorCategory> { ColorCategory.Red };
+                }
+
+                // Set checkboxes (events suppressed by _loading flag)
+                checkRed.Checked = categories.Contains(ColorCategory.Red);
+                checkOrange.Checked = categories.Contains(ColorCategory.Orange);
+                checkGray.Checked = categories.Contains(ColorCategory.Gray);
+
+                Log.Write("Loaded ColorAlert categories: {0}", CategoriesToString(categories));
+
+                // Sync to processor
+                if (_processor != null) {
+                    _processor.EnabledCategories = new HashSet<ColorCategory>(categories);
+                }
+            }
+            finally {
+                _loading = false;
             }
 
             // Load volume and sound settings
@@ -248,6 +271,7 @@ namespace OnTopReplica.SidePanels {
         }
 
         private void CheckColor_CheckedChanged(object sender, EventArgs e) {
+            if (_loading) return; // suppress during panel initialization
             if (_processor != null) {
                 _processor.EnabledCategories = GetEnabledCategories();
                 var catList = CategoriesToString(_processor.EnabledCategories);

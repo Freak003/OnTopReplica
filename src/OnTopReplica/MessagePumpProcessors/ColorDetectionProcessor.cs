@@ -612,8 +612,8 @@ namespace OnTopReplica.MessagePumpProcessors {
                 }
             }
 
-            // Gray: low saturation, mid-range brightness
-            if (s < 15 && v >= 25 && v <= 75) {
+            // Gray: low saturation, mid-range brightness (25%-70%), excludes near-white)
+            if (s < 15 && v >= 25 && v <= 70) {
                 return ColorCategory.Gray;
             }
 
