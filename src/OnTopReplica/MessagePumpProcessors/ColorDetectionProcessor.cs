@@ -428,10 +428,16 @@ namespace OnTopReplica.MessagePumpProcessors {
                 {
                     g.CopyFromScreen(scrRect.X, scrRect.Y, 0, 0, new Size(maxW, maxH));
                 }
+                // 始终保存截图用于调试（限频：每5次保存1次）
                 _debugCounter++;
-                if (_debugCounter % 20 == 1)
+                if (_debugCounter % 5 == 1)
                     SaveDebugBitmap(bmp, "screen_capture");
                 return SampleBitmapForColor(bmp);
+            }
+            catch (Exception ex)
+            {
+                Log.Write("ColorDetection ScreenCapture error: {0}", ex.Message);
+                return false;
             }
             finally
             {
@@ -476,6 +482,12 @@ namespace OnTopReplica.MessagePumpProcessors {
             if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0)
                 return false;
 
+            // 记录最接近的颜色匹配用于调试
+            int bestDiff = int.MaxValue;
+            Color bestPixel = Color.Black;
+            Color bestTarget = Color.Black;
+            int bestX = 0, bestY = 0;
+
             // Scan every pixel for maximum reliability (bitmap is capped to 800x600 for performance)
             for (int y = 0; y < bmp.Height; y++) {
                 for (int x = 0; x < bmp.Width; x++) {
@@ -493,22 +505,86 @@ namespace OnTopReplica.MessagePumpProcessors {
                             SaveDebugBitmap(bmp, "alarm_trigger");
                             return true;
                         }
+                        // 跟踪最接近的匹配
+                        int diff = Math.Abs(pixelColor.R - target.R) + Math.Abs(pixelColor.G - target.G) + Math.Abs(pixelColor.B - target.B);
+                        if (diff < bestDiff) {
+                            bestDiff = diff;
+                            bestPixel = pixelColor;
+                            bestTarget = target;
+                            bestX = x;
+                            bestY = y;
+                        }
                     }
                 }
             }
 
+            // 未匹配时记录最接近的颜色
+            Log.Write("ColorDetection NO MATCH: closest at ({0},{1}) pixel=({2},{3},{4}) target=({5},{6},{7}) totalDiff={8}, bmpSize={9}x{10}",
+                bestX, bestY,
+                bestPixel.R, bestPixel.G, bestPixel.B,
+                bestTarget.R, bestTarget.G, bestTarget.B,
+                bestDiff, bmp.Width, bmp.Height);
             return false;
         }
 
         /// <summary>
         /// Checks if two colors match within the tolerance threshold.
+        /// Uses both RGB per-channel comparison and HSV perceptual comparison.
         /// </summary>
         private bool IsColorMatch(Color color1, Color color2, int tolerance) {
+            // 方法1: RGB 逐通道比较（精确匹配）
             int rDiff = Math.Abs(color1.R - color2.R);
             int gDiff = Math.Abs(color1.G - color2.G);
             int bDiff = Math.Abs(color1.B - color2.B);
+            if (rDiff <= tolerance && gDiff <= tolerance && bDiff <= tolerance)
+                return true;
 
-            return rDiff <= tolerance && gDiff <= tolerance && bDiff <= tolerance;
+            // 方法2: HSV 色相比较（感知相似性，容许不同明度/饱和度的同色系匹配）
+            float h1, s1, v1, h2, s2, v2;
+            RgbToHsv(color1.R, color1.G, color1.B, out h1, out s1, out v1);
+            RgbToHsv(color2.R, color2.G, color2.B, out h2, out s2, out v2);
+
+            // 只有两个颜色都有足够的饱和度和亮度时，色相比较才可靠
+            if (s1 < 15 || s2 < 15 || v1 < 15 || v2 < 15)
+                return false;
+
+            // 色相是环形的 (0-360)
+            float hueDiff = Math.Abs(h1 - h2);
+            if (hueDiff > 180) hueDiff = 360 - hueDiff;
+
+            // tolerance 映射：容差值直接作为度数和百分比
+            // tolerance=30 → H容差30°, S/V容差30%
+            float svDiff = Math.Abs(s1 - s2) + Math.Abs(v1 - v2);
+
+            return hueDiff <= tolerance && svDiff <= tolerance * 2;
+        }
+
+        /// <summary>
+        /// Converts RGB (0-255) to HSV. H in degrees (0-360), S and V in percent (0-100).
+        /// </summary>
+        private static void RgbToHsv(int r, int g, int b, out float h, out float s, out float v) {
+            float rf = r / 255f, gf = g / 255f, bf = b / 255f;
+            float max = Math.Max(rf, Math.Max(gf, bf));
+            float min = Math.Min(rf, Math.Min(gf, bf));
+            float delta = max - min;
+
+            // Value
+            v = max * 100f;
+
+            // Saturation
+            if (max < 0.0001f) { h = 0; s = 0; return; }
+            s = (delta / max) * 100f;
+
+            // Hue
+            if (delta < 0.0001f) { h = 0; return; }
+            if (Math.Abs(max - rf) < 0.0001f)
+                h = 60f * (((gf - bf) / delta) % 6f);
+            else if (Math.Abs(max - gf) < 0.0001f)
+                h = 60f * (((bf - rf) / delta) + 2f);
+            else
+                h = 60f * (((rf - gf) / delta) + 4f);
+
+            if (h < 0) h += 360f;
         }
 
         /// <summary>

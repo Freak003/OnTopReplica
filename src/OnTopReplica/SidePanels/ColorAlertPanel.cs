@@ -60,30 +60,40 @@ namespace OnTopReplica.SidePanels {
 
             // Initialize color/tolerance/interval only if processor exists (real state)
             if (_processor != null) {
-                // migrate processor to support multiple colors
-                _targetColors = new List<Color>(_processor.TargetColors);
-                if (_targetColors.Count > 0)
-                    _selectedColor = _targetColors[0];
                 checkEnabled.Checked = _processor.Enabled;
                 trackBarTolerance.Value = _processor.ColorTolerance;
                 numInterval.Value = _processor.SampleInterval;
-                UpdateColorPreview();
             }
 
-            // populate the color list textbox either from processor or previous settings
+            // 始终优先从配置文件加载颜色（用户保存的完整列表）
+            // 1) 先尝试 JSON 配置文件（最新格式）
+            LoadColorsFromFile();
+            // 2) 再尝试 Settings
             if (_targetColors.Count == 0 && !string.IsNullOrEmpty(Settings.Default.ColorAlertTargetColors)) {
                 ParseColorsFromString(Settings.Default.ColorAlertTargetColors);
             }
-            UpdateColorListText();
-
-            // also try loading from dedicated JSON config file (newer format)
-            if (_targetColors.Count == 0) {
-                LoadColorsFromFile();
+            // 3) 最后从 processor 获取默认值
+            if (_targetColors.Count == 0 && _processor != null) {
+                _targetColors = new List<Color>(_processor.TargetColors);
             }
+            // 4) 兜底默认红色
+            if (_targetColors.Count == 0) {
+                _targetColors.Add(Color.Red);
+            }
+
+            if (_targetColors.Count > 0)
+                _selectedColor = _targetColors[0];
+            UpdateColorPreview();
+            UpdateColorListText();
 
             if (_targetColors.Count > 0) {
                 var list = string.Join(",", _targetColors.Select(c => string.Format("#{0:X6}", c.ToArgb() & 0xFFFFFF)));
                 Log.Write("Loaded ColorAlert target colors: {0}", list);
+            }
+
+            // 初始化完成后立即将颜色列表同步到 processor
+            if (_processor != null && _targetColors.Count > 0) {
+                _processor.TargetColors = new List<Color>(_targetColors);
             }
 
             // irrespective of processor availability, load persisted volume and sound settings,
@@ -365,7 +375,29 @@ namespace OnTopReplica.SidePanels {
         private void CheckEnabled_CheckedChanged(object sender, EventArgs e) {
             if (_processor != null) {
                 _processor.Enabled = checkEnabled.Checked;
+                // 启用时同步所有设置到 processor
+                if (checkEnabled.Checked) {
+                    SyncSettingsToProcessor();
+                }
             }
+        }
+
+        /// <summary>
+        /// Syncs all current panel settings to the color detection processor.
+        /// </summary>
+        private void SyncSettingsToProcessor() {
+            if (_processor == null) return;
+            _processor.TargetColors = new List<Color>(_targetColors);
+            _processor.ColorTolerance = trackBarTolerance.Value;
+            _processor.SampleInterval = (int)numInterval.Value;
+            _processor.AlarmVolume = trackBarVolume.Value / 100f;
+            if (comboSound.SelectedItem != null) {
+                string file = comboSound.SelectedItem.ToString();
+                _processor.AlarmSoundFile = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), SoundsRelativePath, file);
+            }
+            Log.Write("SyncSettingsToProcessor: targets={0}, tol={1}", 
+                string.Join(",", _targetColors.Select(c => string.Format("#{0:X6}", c.ToArgb() & 0xFFFFFF))),
+                trackBarTolerance.Value);
         }
 
         private void BtnClose_Click(object sender, EventArgs e) {
