@@ -19,6 +19,35 @@ namespace OnTopReplica.MessagePumpProcessors {
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetDC(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
+
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+
+        [DllImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool BitBlt(IntPtr hdcDest, int xDest, int yDest, int width, int height, IntPtr hdcSrc, int xSrc, int ySrc, uint rop);
+
+        [DllImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeleteDC(IntPtr hdc);
+
+        [DllImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeleteObject(IntPtr hObject);
+
+        private const uint SRCCOPY = 0x00CC0020;
+
         // PW_RENDERFULLCONTENT = 2: full rendering including DirectComposition content
         private const uint PW_RENDERFULLCONTENT = 2;
         // PW_CLIENTONLY = 1: only client area
@@ -298,13 +327,92 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// CopyFromScreen fallback when PrintWindow fails.
-        /// Temporarily hides OnTopReplica window to avoid capturing the overlay.
+        /// Fallback: use BitBlt from source window DC to capture client area directly.
+        /// This avoids CopyFromScreen which captures the OnTopReplica overlay.
+        /// If BitBlt returns all-black image, falls back to CopyFromScreen with opacity trick.
         /// </summary>
         private bool DetectColorFallback(IntPtr windowHandle, Rectangle regionRect)
         {
+            Log.Write("ColorDetection Fallback(BitBlt): region={0},{1} {2}x{3}",
+                regionRect.X, regionRect.Y, regionRect.Width, regionRect.Height);
+
+            if (regionRect.Width <= 0 || regionRect.Height <= 0)
+                return false;
+
+            int cropW = Math.Min(regionRect.Width, 800);
+            int cropH = Math.Min(regionRect.Height, 600);
+
+            // 方案1: 使用 BitBlt + GetDC 直接从源窗口客户区捕获（无闪烁）
+            IntPtr hdcSrc = IntPtr.Zero;
+            IntPtr hdcMem = IntPtr.Zero;
+            IntPtr hBitmap = IntPtr.Zero;
+            IntPtr hOldBmp = IntPtr.Zero;
+            Bitmap bmp = null;
+            try
+            {
+                hdcSrc = GetDC(windowHandle);
+                if (hdcSrc != IntPtr.Zero)
+                {
+                    hdcMem = CreateCompatibleDC(hdcSrc);
+                    hBitmap = CreateCompatibleBitmap(hdcSrc, cropW, cropH);
+                    hOldBmp = SelectObject(hdcMem, hBitmap);
+
+                    bool ok = BitBlt(hdcMem, 0, 0, cropW, cropH, hdcSrc, regionRect.X, regionRect.Y, SRCCOPY);
+                    SelectObject(hdcMem, hOldBmp);
+
+                    if (ok)
+                    {
+                        bmp = Bitmap.FromHbitmap(hBitmap);
+
+                        // 检查是否全黑（硬件渲染窗口可能返回黑色图像）
+                        if (!IsBitmapAllBlack(bmp))
+                        {
+                            Log.Write("ColorDetection Fallback: BitBlt OK, size={0}x{1}", cropW, cropH);
+                            _debugCounter++;
+                            if (_debugCounter % 20 == 1)
+                                SaveDebugBitmap(bmp, "bitblt_capture");
+                            return SampleBitmapForColor(bmp);
+                        }
+                        else
+                        {
+                            Log.Write("ColorDetection Fallback: BitBlt returned all-black, trying CopyFromScreen");
+                            bmp.Dispose();
+                            bmp = null;
+                        }
+                    }
+                    else
+                    {
+                        Log.Write("ColorDetection Fallback: BitBlt failed");
+                    }
+                }
+                else
+                {
+                    Log.Write("ColorDetection Fallback: GetDC failed");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("ColorDetection Fallback BitBlt error: {0}", ex.Message);
+                if (bmp != null) { bmp.Dispose(); bmp = null; }
+            }
+            finally
+            {
+                if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+                if (hdcMem != IntPtr.Zero) DeleteDC(hdcMem);
+                if (hdcSrc != IntPtr.Zero) ReleaseDC(windowHandle, hdcSrc);
+            }
+
+            // 方案2: CopyFromScreen（最后手段，可能包含覆盖层但不会闪烁）
+            return DetectColorScreenCapture(windowHandle, regionRect);
+        }
+
+        /// <summary>
+        /// Last resort: CopyFromScreen. May capture overlay but does not flicker.
+        /// </summary>
+        private bool DetectColorScreenCapture(IntPtr windowHandle, Rectangle regionRect)
+        {
             var scrRect = WindowManagerMethods.ClientToScreenRect(windowHandle, regionRect);
-            Log.Write("ColorDetection Fallback: screen={0},{1} {2}x{3}", scrRect.X, scrRect.Y, scrRect.Width, scrRect.Height);
+            Log.Write("ColorDetection ScreenCapture: screen={0},{1} {2}x{3}", scrRect.X, scrRect.Y, scrRect.Width, scrRect.Height);
 
             if (scrRect.Width <= 0 || scrRect.Height <= 0)
                 return false;
@@ -312,58 +420,44 @@ namespace OnTopReplica.MessagePumpProcessors {
             int maxW = Math.Min(scrRect.Width, 800);
             int maxH = Math.Min(scrRect.Height, 600);
 
-            // 获取主窗体，截屏前临时隐藏以避免捕获覆盖层
-            MainForm mainForm = null;
-            foreach (Form form in Application.OpenForms)
-            {
-                if (form is MainForm mf)
-                {
-                    mainForm = mf;
-                    break;
-                }
-            }
-
-            double savedOpacity = 1.0;
-            bool wasHidden = false;
             Bitmap bmp = null;
             try
             {
-                // 临时将 OnTopReplica 窗口透明度设为 0，使其对截屏不可见
-                if (mainForm != null)
-                {
-                    savedOpacity = mainForm.Opacity;
-                    mainForm.Opacity = 0;
-                    // 等待 DWM 合成器更新（需要足够时间让窗口从屏幕消失）
-                    System.Threading.Thread.Sleep(80);
-                    wasHidden = true;
-                    Log.Write("ColorDetection Fallback: Temporarily hidden OnTopReplica (opacity 0)");
-                }
-
                 bmp = new Bitmap(maxW, maxH, PixelFormat.Format32bppArgb);
                 using (Graphics g = Graphics.FromImage(bmp))
                 {
                     g.CopyFromScreen(scrRect.X, scrRect.Y, 0, 0, new Size(maxW, maxH));
                 }
-
-                // 保存调试截图
                 _debugCounter++;
                 if (_debugCounter % 20 == 1)
-                {
-                    SaveDebugBitmap(bmp, "fallback_capture");
-                }
-
+                    SaveDebugBitmap(bmp, "screen_capture");
                 return SampleBitmapForColor(bmp);
             }
             finally
             {
-                // 恢复窗口透明度
-                if (wasHidden && mainForm != null)
-                {
-                    mainForm.Opacity = savedOpacity;
-                }
-                if (bmp != null)
-                    bmp.Dispose();
+                if (bmp != null) bmp.Dispose();
             }
+        }
+
+        /// <summary>
+        /// Checks if a bitmap is entirely black (indicating failed capture).
+        /// Samples a few pixels for speed.
+        /// </summary>
+        private bool IsBitmapAllBlack(Bitmap bmp)
+        {
+            if (bmp == null) return true;
+            int stepX = Math.Max(1, bmp.Width / 8);
+            int stepY = Math.Max(1, bmp.Height / 8);
+            for (int y = 0; y < bmp.Height; y += stepY)
+            {
+                for (int x = 0; x < bmp.Width; x += stepX)
+                {
+                    Color c = bmp.GetPixel(x, y);
+                    if (c.R > 2 || c.G > 2 || c.B > 2)
+                        return false;
+                }
+            }
+            return true;
         }
 
         /// <summary>
