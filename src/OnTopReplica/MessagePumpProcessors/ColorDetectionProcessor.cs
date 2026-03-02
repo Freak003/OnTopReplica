@@ -442,7 +442,8 @@ namespace OnTopReplica.MessagePumpProcessors {
         /// <summary>
         /// Checks if a bitmap is nearly black (indicating failed capture from hardware-rendered window).
         /// A pixel is considered "black" if all channels are &lt;= threshold.
-        /// Returns true if more than 95% of sampled pixels are near-black.
+        /// Returns true if more than 50% of sampled pixels are near-black.
+        /// Hardware-rendered windows often return mostly-black images with scattered noise.
         /// </summary>
         private bool IsBitmapAllBlack(Bitmap bmp)
         {
@@ -462,9 +463,9 @@ namespace OnTopReplica.MessagePumpProcessors {
                         blackSamples++;
                 }
             }
-            bool result = totalSamples > 0 && (blackSamples * 100 / totalSamples) >= 95;
+            bool result = totalSamples > 0 && (blackSamples * 100 / totalSamples) >= 50;
             if (result)
-                Log.Write("ColorDetection: IsBitmapAllBlack=true ({0}/{1} samples near-black, threshold={2})", blackSamples, totalSamples, threshold);
+                Log.Write("ColorDetection: IsBitmapAllBlack=true ({0}/{1} samples near-black={2}%, threshold={3})", blackSamples, totalSamples, blackSamples * 100 / totalSamples, threshold);
             return result;
         }
 
