@@ -272,11 +272,13 @@ namespace OnTopReplica.SidePanels {
 
         private void CheckColor_CheckedChanged(object sender, EventArgs e) {
             if (_loading) return; // suppress during panel initialization
+            var categories = GetEnabledCategories();
             if (_processor != null) {
-                _processor.EnabledCategories = GetEnabledCategories();
-                var catList = CategoriesToString(_processor.EnabledCategories);
-                Log.Write("Color categories changed: {0}", catList);
+                _processor.EnabledCategories = new HashSet<ColorCategory>(categories);
+                Log.Write("Color categories changed: {0}", CategoriesToString(categories));
             }
+            // Persist immediately so reopening the panel restores the correct state
+            SaveCategoriesToFile(categories);
         }
 
         /// <summary>
