@@ -7,6 +7,7 @@ using OnTopReplica.Native;
 using OnTopReplica.Properties;
 using OnTopReplica.StartupOptions;
 using OnTopReplica.Update;
+using OnTopReplica.MultiWindow;
 using OnTopReplica.WindowSeekers;
 using WindowsFormsAero.Dwm;
 using WindowsFormsAero.TaskDialog;
@@ -23,12 +24,18 @@ namespace OnTopReplica {
         WindowListMenuManager _windowListManager;
         public FullscreenFormManager FullscreenManager { get; private set; }
 
+        /// <summary>
+        /// Manager for multi-window simultaneous monitoring with color detection.
+        /// </summary>
+        public MultiWindowManager MultiWindowManager { get; private set; }
+
         Options _startupOptions;
 
         public MainForm(Options startupOptions) {
             _startupOptions = startupOptions;
 
             FullscreenManager = new FullscreenFormManager(this);
+            MultiWindowManager = new MultiWindowManager { Form = this };
             _quickRegionDrawingHandler = new ThumbnailPanel.RegionDrawnHandler(HandleQuickRegionDrawn);
             
             //WinForms init pass
@@ -89,6 +96,7 @@ namespace OnTopReplica {
             Log.Write("Main form closing");
             base.OnClosing(e);
 
+            MultiWindowManager.Dispose();
             _msgPumpManager.Dispose();
             Program.Platform.CloseForm(this);
         }

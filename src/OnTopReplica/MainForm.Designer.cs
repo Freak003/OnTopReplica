@@ -65,6 +65,7 @@
             this.reduceToIconToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             this.colorAlertToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.multiWindowToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.settingsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.aboutToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuContextClose = new System.Windows.Forms.ToolStripMenuItem();
@@ -98,6 +99,7 @@
             this.reduceToIconToolStripMenuItem,
             this.toolStripSeparator1,
             this.colorAlertToolStripMenuItem,
+            this.multiWindowToolStripMenuItem,
             this.settingsToolStripMenuItem,
             this.aboutToolStripMenuItem,
             this.menuContextClose});
@@ -436,6 +438,14 @@
             this.colorAlertToolStripMenuItem.ToolTipText = global::OnTopReplica.Strings.ColorAlert_MenuTooltip ?? "Monitor window for specific color and alert";
             this.colorAlertToolStripMenuItem.Click += new System.EventHandler(this.Menu_ColorAlert_click);
             // 
+            // multiWindowToolStripMenuItem
+            // 
+            this.multiWindowToolStripMenuItem.Name = "multiWindowToolStripMenuItem";
+            this.multiWindowToolStripMenuItem.Size = new System.Drawing.Size(186, 22);
+            this.multiWindowToolStripMenuItem.Text = "Multi-Window Monitor";
+            this.multiWindowToolStripMenuItem.ToolTipText = "Monitor multiple windows with synchronized color detection";
+            this.multiWindowToolStripMenuItem.Click += new System.EventHandler(this.Menu_MultiWindow_click);
+            // 
             // aboutToolStripMenuItem
             // 
             this.aboutToolStripMenuItem.Image = global::OnTopReplica.Properties.Resources.help;
@@ -570,6 +580,7 @@
         private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem4;
         private System.Windows.Forms.ToolStripMenuItem aboutToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem colorAlertToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem multiWindowToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem reduceToIconToolStripMenuItem;
 		private System.Windows.Forms.ToolStripMenuItem selectRegionToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem resizeToolStripMenuItem;

@@ -207,6 +207,14 @@
     <Compile Include="SidePanels\GroupSwitchPanel.Designer.cs">
       <DependentUpon>GroupSwitchPanel.cs</DependentUpon>
     </Compile>
+    <Compile Include="SidePanels\MultiWindowPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="SidePanels\MultiWindowPanel.Designer.cs">
+      <DependentUpon>MultiWindowPanel.cs</DependentUpon>
+    </Compile>
+    <Compile Include="MultiWindow\MonitoredWindow.cs" />
+    <Compile Include="MultiWindow\MultiWindowManager.cs" />
     <Compile Include="StartupOptions\FourValueTypeConverter.cs" />
     <Compile Include="StartupOptions\PaddingConverter.cs" />
     <Compile Include="Strings.zh-TW.Designer.cs">
