@@ -412,6 +412,17 @@ namespace OnTopReplica.SidePanels {
                 bool hasColor = _manager.ColorDetectionEnabled && _manager.EnabledCategories.Count > 0;
                 bool hasIcon = _manager.IconDetectionEnabled && _manager.IconTemplate != null;
 
+                // Give specific feedback for misconfigured detection modes
+                if (_manager.IconDetectionEnabled && _manager.IconTemplate == null) {
+                    MessageBox.Show("图形检测已启用，但尚未设置图形模板。\n请点击【从预览截取】或【从文件加载】设置模板。",
+                        "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                if (_manager.ColorDetectionEnabled && _manager.EnabledCategories.Count == 0) {
+                    MessageBox.Show("颜色检测已启用，但未选择任何颜色类别（红/橙/灰）。",
+                        "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
                 if (!hasColor && !hasIcon) {
                     MessageBox.Show("请至少启用一种检测方式（颜色检测或图形检测）。",
                         "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Warning);
