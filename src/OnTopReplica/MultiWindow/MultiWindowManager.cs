@@ -77,6 +77,10 @@ namespace OnTopReplica.MultiWindow {
         private int _iconTemplateStride = 0;
         private bool _iconDetectionEnabled = false;
         private float _iconMatchThreshold = 0.85f; // 85% similarity required
+        // Normalization size: the ThumbnailPanel display size at template capture time.
+        // Captured window regions are resized to this before matching to correct scale mismatch.
+        private int _iconCaptureNormalizeW = 0;
+        private int _iconCaptureNormalizeH = 0;
         private volatile bool _iconAlarmActive = false;
 
         // Sound for icon disappearance alarm  
@@ -185,8 +189,12 @@ namespace OnTopReplica.MultiWindow {
 
         /// <summary>
         /// Sets the icon template from a bitmap. Pre-computes pixel data for fast matching.
+        /// <param name="normalizeW">ThumbnailPanel display width at capture time (0 = no normalization).</param>
+        /// <param name="normalizeH">ThumbnailPanel display height at capture time (0 = no normalization).</param>
         /// </summary>
-        public void SetIconTemplate(Bitmap template) {
+        public void SetIconTemplate(Bitmap template, int normalizeW = 0, int normalizeH = 0) {
+            _iconCaptureNormalizeW = normalizeW;
+            _iconCaptureNormalizeH = normalizeH;
             if (_iconTemplate != null) {
                 _iconTemplate.Dispose();
                 _iconTemplate = null;
@@ -215,7 +223,8 @@ namespace OnTopReplica.MultiWindow {
                 if (data != null) _iconTemplate.UnlockBits(data);
             }
 
-            Log.Write("MultiWindowManager: Icon template set, {0}x{1}", _iconTemplateW, _iconTemplateH);
+            Log.Write("MultiWindowManager: Icon template set, {0}x{1}, normalizeTarget={2}x{3}",
+                _iconTemplateW, _iconTemplateH, normalizeW, normalizeH);
         }
 
         #endregion
@@ -396,9 +405,12 @@ namespace OnTopReplica.MultiWindow {
 
                             // --- Icon/graphic detection ---
                             if (anyIconEnabled) {
-                                bool iconFound = MatchIconTemplate(regionBmp);
+                                float iconScore;
+                                bool iconFound = MatchIconTemplate(regionBmp, out iconScore);
                                 mw.LastIconDetected = iconFound;
                                 iconCheckedCount++;
+                                Log.Write("MultiWindowManager: Icon check '{0}': score={1:F3} found={2}",
+                                    mw.Title, iconScore, iconFound);
 
                                 if (iconFound) {
                                     allWindowsLostIcon = false;
@@ -678,10 +690,24 @@ namespace OnTopReplica.MultiWindow {
 
         /// <summary>
         /// Searches for the icon template in the given bitmap using sliding window + color histogram matching.
-        /// Returns true if a match above threshold is found.
+        /// Returns true if a match above threshold is found. bestScore receives the highest found score.
         /// </summary>
-        private bool MatchIconTemplate(Bitmap source) {
+        private bool MatchIconTemplate(Bitmap source, out float bestScore) {
+            bestScore = 0;
             if (_iconTemplatePixels == null || source == null) return false;
+
+            // --- Scale normalization ---
+            // The template was captured from ThumbnailPanel at display scale.
+            // The source is captured from the actual full-resolution game window.
+            // Resize source to _iconCaptureNormalizeW x _iconCaptureNormalizeH so scales match.
+            Bitmap normalizedSource = null;
+            if (_iconCaptureNormalizeW > 0 && _iconCaptureNormalizeH > 0 &&
+                (source.Width != _iconCaptureNormalizeW || source.Height != _iconCaptureNormalizeH)) {
+                normalizedSource = new Bitmap(source, _iconCaptureNormalizeW, _iconCaptureNormalizeH);
+                source = normalizedSource;
+            }
+
+            try {
 
             int srcW = source.Width;
             int srcH = source.Height;
@@ -712,7 +738,6 @@ namespace OnTopReplica.MultiWindow {
 
             // Slide the template window across the source, step by 2px for speed
             int step = Math.Max(1, Math.Min(tplW, tplH) / 4);
-            float bestScore = 0;
 
             for (int sy = 0; sy <= srcH - tplH; sy += step) {
                 for (int sx = 0; sx <= srcW - tplW; sx += step) {
@@ -725,6 +750,10 @@ namespace OnTopReplica.MultiWindow {
             }
 
             return false;
+
+            } finally {
+                if (normalizedSource != null) normalizedSource.Dispose();
+            }
         }
 
         /// <summary>

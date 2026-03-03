@@ -332,7 +332,10 @@ namespace OnTopReplica.SidePanels {
             // Show capture dialog
             using (var dlg = new IconCaptureDialog(snapshot)) {
                 if (dlg.ShowDialog(this) == DialogResult.OK && dlg.CapturedRegion != null) {
-                    _manager.SetIconTemplate(dlg.CapturedRegion);
+                    // Pass panel display dimensions so the manager can normalize
+                    // captured full-res window to the same scale for matching.
+                    var panel2 = ParentMainForm.ThumbnailPanel;
+                    _manager.SetIconTemplate(dlg.CapturedRegion, panel2.Width, panel2.Height);
                     UpdateIconPreview();
                 }
             }
@@ -350,7 +353,11 @@ namespace OnTopReplica.SidePanels {
                 if (ofd.ShowDialog(this) == DialogResult.OK) {
                     try {
                         using (var img = new Bitmap(ofd.FileName)) {
-                            _manager.SetIconTemplate(img);
+                            // Use current ThumbnailPanel dimensions as normalization target.
+                            var panel = ParentMainForm?.ThumbnailPanel;
+                            int nw = panel != null ? panel.Width : 0;
+                            int nh = panel != null ? panel.Height : 0;
+                            _manager.SetIconTemplate(img, nw, nh);
                         }
                         UpdateIconPreview();
                     }
