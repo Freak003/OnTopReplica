@@ -44,6 +44,8 @@ namespace OnTopReplica.SidePanels {
             this.btnClearIcon = new System.Windows.Forms.Button();
             this.picIconPreview = new System.Windows.Forms.PictureBox();
             this.lblIconStatus = new System.Windows.Forms.Label();
+            this.lblAlarmSound = new System.Windows.Forms.Label();
+            this.cmbAlarmSound = new System.Windows.Forms.ComboBox();
             // Bottom panel
             this.panelBottom = new System.Windows.Forms.Panel();
 
@@ -97,7 +99,7 @@ namespace OnTopReplica.SidePanels {
             this.panelBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.panelBottom.Location = new System.Drawing.Point(0, 266);
             this.panelBottom.Name = "panelBottom";
-            this.panelBottom.Size = new System.Drawing.Size(500, 334);
+            this.panelBottom.Size = new System.Drawing.Size(500, 361);
             this.panelBottom.TabIndex = 10;
             this.panelBottom.Controls.Add(this.grpColor);
             this.panelBottom.Controls.Add(this.grpIcon);
@@ -157,7 +159,7 @@ namespace OnTopReplica.SidePanels {
             // =============================================
             this.grpIcon.Location = new System.Drawing.Point(6, 78);
             this.grpIcon.Name = "grpIcon";
-            this.grpIcon.Size = new System.Drawing.Size(488, 190);
+            this.grpIcon.Size = new System.Drawing.Size(488, 217);
             this.grpIcon.TabIndex = 1;
             this.grpIcon.TabStop = false;
             this.grpIcon.Text = "图形检测（图形从所有窗口消失时报警）";
@@ -167,6 +169,8 @@ namespace OnTopReplica.SidePanels {
             this.grpIcon.Controls.Add(this.btnClearIcon);
             this.grpIcon.Controls.Add(this.picIconPreview);
             this.grpIcon.Controls.Add(this.lblIconStatus);
+            this.grpIcon.Controls.Add(this.lblAlarmSound);
+            this.grpIcon.Controls.Add(this.cmbAlarmSound);
             //
             this.chkIconEnabled.Location = new System.Drawing.Point(12, 22);
             this.chkIconEnabled.Name = "chkIconEnabled";
@@ -213,9 +217,23 @@ namespace OnTopReplica.SidePanels {
             //
             this.lblIconStatus.Location = new System.Drawing.Point(118, 88);
             this.lblIconStatus.Name = "lblIconStatus";
-            this.lblIconStatus.Size = new System.Drawing.Size(360, 60);
+            this.lblIconStatus.Size = new System.Drawing.Size(360, 55);
             this.lblIconStatus.TabIndex = 5;
             this.lblIconStatus.Text = "未设置模板\n\n当参考图形从所有监控窗口的监控区域中消失时，将触发提示音。";
+            //
+            this.lblAlarmSound.Location = new System.Drawing.Point(12, 188);
+            this.lblAlarmSound.Name = "lblAlarmSound";
+            this.lblAlarmSound.Size = new System.Drawing.Size(65, 20);
+            this.lblAlarmSound.TabIndex = 6;
+            this.lblAlarmSound.Text = "报警声音:";
+            this.lblAlarmSound.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            //
+            this.cmbAlarmSound.Location = new System.Drawing.Point(80, 186);
+            this.cmbAlarmSound.Name = "cmbAlarmSound";
+            this.cmbAlarmSound.Size = new System.Drawing.Size(400, 23);
+            this.cmbAlarmSound.TabIndex = 7;
+            this.cmbAlarmSound.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbAlarmSound.SelectedIndexChanged += new System.EventHandler(this.cmbAlarmSound_SelectedIndexChanged);
 
             // =============================================
             // panelButtons
@@ -225,7 +243,7 @@ namespace OnTopReplica.SidePanels {
             this.panelButtons.Controls.Add(this.btnStopMonitor);
             this.panelButtons.Controls.Add(this.btnRefresh);
             this.panelButtons.Controls.Add(this.btnClose);
-            this.panelButtons.Location = new System.Drawing.Point(0, 272);
+            this.panelButtons.Location = new System.Drawing.Point(0, 299);
             this.panelButtons.Name = "panelButtons";
             this.panelButtons.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
             this.panelButtons.Padding = new System.Windows.Forms.Padding(3);
@@ -265,7 +283,7 @@ namespace OnTopReplica.SidePanels {
             // =============================================
             // labelStatus
             // =============================================
-            this.labelStatus.Location = new System.Drawing.Point(0, 310);
+            this.labelStatus.Location = new System.Drawing.Point(0, 337);
             this.labelStatus.Name = "labelStatus";
             this.labelStatus.Padding = new System.Windows.Forms.Padding(6, 2, 6, 2);
             this.labelStatus.Size = new System.Drawing.Size(500, 24);
@@ -281,8 +299,8 @@ namespace OnTopReplica.SidePanels {
             this.Controls.Add(this.labelHelp);
             this.Controls.Add(this.panelBottom);
             this.Name = "MultiWindowPanel";
-            this.MinimumSize = new System.Drawing.Size(500, 600);
-            this.Size = new System.Drawing.Size(500, 600);
+            this.MinimumSize = new System.Drawing.Size(500, 627);
+            this.Size = new System.Drawing.Size(500, 627);
 
             this.panelButtons.ResumeLayout(false);
             this.grpColor.ResumeLayout(false);
@@ -321,5 +339,7 @@ namespace OnTopReplica.SidePanels {
         private System.Windows.Forms.Button btnClearIcon;
         private System.Windows.Forms.PictureBox picIconPreview;
         private System.Windows.Forms.Label lblIconStatus;
+        private System.Windows.Forms.Label lblAlarmSound;
+        private System.Windows.Forms.ComboBox cmbAlarmSound;
     }
 }

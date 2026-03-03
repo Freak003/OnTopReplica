@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using OnTopReplica.MultiWindow;
@@ -211,6 +212,7 @@ namespace OnTopReplica.SidePanels {
 
         private void SyncIconSettingsFromManager() {
             chkIconEnabled.Checked = _manager.IconDetectionEnabled;
+            LoadAlarmSounds();
             UpdateIconPreview();
             UpdateIconControlsEnabled();
         }
@@ -242,6 +244,63 @@ namespace OnTopReplica.SidePanels {
         }
 
         /// <summary>
+        /// Loads available sound files from the Sounds directory next to the executable
+        /// and populates the alarm sound ComboBox.
+        /// </summary>
+        private void LoadAlarmSounds() {
+            cmbAlarmSound.SelectedIndexChanged -= cmbAlarmSound_SelectedIndexChanged;
+            cmbAlarmSound.Items.Clear();
+
+            // Default: use system sound
+            cmbAlarmSound.Items.Add(new SoundItem("（系统默认）", string.Empty));
+
+            var soundsDir = Path.Combine(
+                Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath), "Sounds");
+
+            if (Directory.Exists(soundsDir)) {
+                foreach (var file in Directory.GetFiles(soundsDir, "*.*")
+                    .Where(f => {
+                        var ext = Path.GetExtension(f).ToLowerInvariant();
+                        return ext == ".mp3" || ext == ".wav" || ext == ".wma";
+                    })
+                    .OrderBy(f => f)) {
+                    cmbAlarmSound.Items.Add(
+                        new SoundItem(Path.GetFileNameWithoutExtension(file), file));
+                }
+            }
+
+            // Select the item matching the current manager setting
+            int selected = 0;
+            for (int i = 0; i < cmbAlarmSound.Items.Count; i++) {
+                var item = (SoundItem)cmbAlarmSound.Items[i];
+                if (string.Equals(item.FilePath, _manager.AlarmSoundFile,
+                        StringComparison.OrdinalIgnoreCase)) {
+                    selected = i;
+                    break;
+                }
+            }
+            cmbAlarmSound.SelectedIndex = selected;
+            cmbAlarmSound.SelectedIndexChanged += cmbAlarmSound_SelectedIndexChanged;
+        }
+
+        private void cmbAlarmSound_SelectedIndexChanged(object sender, EventArgs e) {
+            if (cmbAlarmSound.SelectedItem is SoundItem item) {
+                _manager.AlarmSoundFile = item.FilePath;
+            }
+        }
+
+        /// <summary>Represents a selectable alarm sound file.</summary>
+        private class SoundItem {
+            public string DisplayName { get; }
+            public string FilePath { get; }
+            public SoundItem(string displayName, string filePath) {
+                DisplayName = displayName;
+                FilePath = filePath;
+            }
+            public override string ToString() { return DisplayName; }
+        }
+
+        /// <summary>
         /// Capture icon template from the current ThumbnailPanel preview.
         /// User selects a rectangular region by drawing on a snapshot.
         /// </summary>
@@ -257,8 +316,13 @@ namespace OnTopReplica.SidePanels {
                     return;
                 }
 
-                snapshot = new Bitmap(panel.Width, panel.Height);
-                panel.DrawToBitmap(snapshot, new Rectangle(0, 0, panel.Width, panel.Height));
+                // DWM thumbnails are rendered by the compositor and are invisible to GDI DrawToBitmap.
+                // Capture the actual screen pixels at the ThumbnailPanel's screen location instead.
+                snapshot = new Bitmap(panel.Width, panel.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                var screenPt = panel.PointToScreen(Point.Empty);
+                using (var g = Graphics.FromImage(snapshot)) {
+                    g.CopyFromScreen(screenPt, Point.Empty, new Size(panel.Width, panel.Height));
+                }
             }
             catch (Exception ex) {
                 MessageBox.Show("截图失败: " + ex.Message, "图形捕获", MessageBoxButtons.OK, MessageBoxIcon.Error);

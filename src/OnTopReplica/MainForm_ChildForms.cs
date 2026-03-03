@@ -23,7 +23,10 @@ namespace OnTopReplica {
             _sidePanelContainer = new SidePanelContainer(this);
             _sidePanelContainer.SetSidePanel(panel);
             _sidePanelContainer.Location = ComputeSidePanelLocation(_sidePanelContainer);
-            _sidePanelContainer.Show(); // 不再以主窗体为 owner
+            // Sync TopMost so the side panel stays visible when the main form is "Always on Top".
+            // Without matching TopMost the owned panel would fall behind the TopMost main form.
+            _sidePanelContainer.TopMost = this.TopMost;
+            _sidePanelContainer.Show(this); // owner = this ensures correct z-order for popup menus
         }
 
         /// <summary>
