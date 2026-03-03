@@ -392,28 +392,27 @@ namespace OnTopReplica.SidePanels {
 
         #region Buttons
 
-        private void btnStartMonitor_Click(object sender, EventArgs e) {
-            if (_manager.Windows.Count == 0) {
-                MessageBox.Show("请先勾选至少一个要监控的窗口。",
-                    "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+        private void btnToggleMonitor_Click(object sender, EventArgs e) {
+            if (_manager.IsActive) {
+                _manager.StopDetection();
+            } else {
+                if (_manager.Windows.Count == 0) {
+                    MessageBox.Show("请先勾选至少一个要监控的窗口。",
+                        "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                bool hasColor = _manager.ColorDetectionEnabled && _manager.EnabledCategories.Count > 0;
+                bool hasIcon = _manager.IconDetectionEnabled && _manager.IconTemplate != null;
+
+                if (!hasColor && !hasIcon) {
+                    MessageBox.Show("请至少启用一种检测方式（颜色检测或图形检测）。",
+                        "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                _manager.StartDetection();
             }
-
-            bool hasColor = _manager.ColorDetectionEnabled && _manager.EnabledCategories.Count > 0;
-            bool hasIcon = _manager.IconDetectionEnabled && _manager.IconTemplate != null;
-
-            if (!hasColor && !hasIcon) {
-                MessageBox.Show("请至少启用一种检测方式（颜色检测或图形检测）。",
-                    "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            _manager.StartDetection();
-            UpdateStatus();
-        }
-
-        private void btnStopMonitor_Click(object sender, EventArgs e) {
-            _manager.StopDetection();
             UpdateStatus();
         }
 
@@ -443,6 +442,8 @@ namespace OnTopReplica.SidePanels {
             string primaryName = primary != null ? primary.Title : "（无）";
             labelStatus.Text = string.Format("监控中：{0} 个窗口  |  主窗口：{1}",
                 total, primaryName);
+
+            btnToggleMonitor.Text = _manager.IsActive ? "停止监控" : "开始监控";
         }
     }
 }

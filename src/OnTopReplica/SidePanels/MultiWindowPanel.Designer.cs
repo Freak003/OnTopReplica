@@ -23,8 +23,7 @@ namespace OnTopReplica.SidePanels {
             this.colStatus = new System.Windows.Forms.ColumnHeader();
             this.colPrimary = new System.Windows.Forms.ColumnHeader();
             this.btnSetPrimary = new System.Windows.Forms.Button();
-            this.btnStartMonitor = new System.Windows.Forms.Button();
-            this.btnStopMonitor = new System.Windows.Forms.Button();
+            this.btnToggleMonitor = new System.Windows.Forms.Button();
             this.btnRefresh = new System.Windows.Forms.Button();
             this.btnClose = new System.Windows.Forms.Button();
             this.labelStatus = new System.Windows.Forms.Label();
@@ -239,8 +238,7 @@ namespace OnTopReplica.SidePanels {
             // panelButtons
             // =============================================
             this.panelButtons.Controls.Add(this.btnSetPrimary);
-            this.panelButtons.Controls.Add(this.btnStartMonitor);
-            this.panelButtons.Controls.Add(this.btnStopMonitor);
+            this.panelButtons.Controls.Add(this.btnToggleMonitor);
             this.panelButtons.Controls.Add(this.btnRefresh);
             this.panelButtons.Controls.Add(this.btnClose);
             this.panelButtons.Location = new System.Drawing.Point(0, 299);
@@ -256,17 +254,11 @@ namespace OnTopReplica.SidePanels {
             this.btnSetPrimary.UseVisualStyleBackColor = true;
             this.btnSetPrimary.Click += new System.EventHandler(this.btnSetPrimary_Click);
             //
-            this.btnStartMonitor.Size = new System.Drawing.Size(75, 28);
-            this.btnStartMonitor.Name = "btnStartMonitor";
-            this.btnStartMonitor.Text = "开始监控";
-            this.btnStartMonitor.UseVisualStyleBackColor = true;
-            this.btnStartMonitor.Click += new System.EventHandler(this.btnStartMonitor_Click);
-            //
-            this.btnStopMonitor.Size = new System.Drawing.Size(75, 28);
-            this.btnStopMonitor.Name = "btnStopMonitor";
-            this.btnStopMonitor.Text = "停止监控";
-            this.btnStopMonitor.UseVisualStyleBackColor = true;
-            this.btnStopMonitor.Click += new System.EventHandler(this.btnStopMonitor_Click);
+            this.btnToggleMonitor.Size = new System.Drawing.Size(75, 28);
+            this.btnToggleMonitor.Name = "btnToggleMonitor";
+            this.btnToggleMonitor.Text = "开始监控";
+            this.btnToggleMonitor.UseVisualStyleBackColor = true;
+            this.btnToggleMonitor.Click += new System.EventHandler(this.btnToggleMonitor_Click);
             //
             this.btnRefresh.Size = new System.Drawing.Size(60, 28);
             this.btnRefresh.Name = "btnRefresh";
@@ -317,8 +309,7 @@ namespace OnTopReplica.SidePanels {
         private System.Windows.Forms.ColumnHeader colStatus;
         private System.Windows.Forms.ColumnHeader colPrimary;
         private System.Windows.Forms.Button btnSetPrimary;
-        private System.Windows.Forms.Button btnStartMonitor;
-        private System.Windows.Forms.Button btnStopMonitor;
+        private System.Windows.Forms.Button btnToggleMonitor;
         private System.Windows.Forms.Button btnRefresh;
         private System.Windows.Forms.Button btnClose;
         private System.Windows.Forms.Label labelStatus;
