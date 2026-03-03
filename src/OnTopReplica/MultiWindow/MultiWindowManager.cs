@@ -63,7 +63,7 @@ namespace OnTopReplica.MultiWindow {
         private readonly List<MonitoredWindow> _windows = new List<MonitoredWindow>();
         private volatile bool _detectionRunning = false;
         private System.Threading.Thread _detectionThread;
-        private int _sampleInterval = 500;
+        private int _sampleInterval = 1000; // ms between scan rounds
 
         // Independent color detection settings
         private readonly HashSet<ColorCategory> _enabledCategories = new HashSet<ColorCategory>();
@@ -371,8 +371,11 @@ namespace OnTopReplica.MultiWindow {
 
                 if (!anyColorEnabled && !anyIconEnabled) continue;
 
-                // Track icon presence across ALL windows for disappearance alarm
+                // Track icon presence across ALL windows for disappearance alarm.
+                // Short-circuit optimization: once any window reports icon found,
+                // remaining windows skip icon detection (no alarm can trigger).
                 bool allWindowsLostIcon = anyIconEnabled;
+                bool needIconCheck = anyIconEnabled; // set false as soon as icon is found
                 int iconCheckedCount = 0;
 
                 foreach (var mw in _windows.ToArray()) {
@@ -382,6 +385,14 @@ namespace OnTopReplica.MultiWindow {
                         Log.Write("MultiWindowManager: Window '{0}' no longer valid, removing", mw.Title);
                         _windows.Remove(mw);
                         WindowListChanged?.Invoke();
+                        continue;
+                    }
+
+                    // If only icon detection is enabled and we already found it,
+                    // skip capturing this window entirely — no need to allocate bitmap.
+                    bool needCapture = anyColorEnabled || needIconCheck;
+                    if (!needCapture) {
+                        mw.LastIconDetected = true; // assumed present (we already found it in an earlier window)
                         continue;
                     }
 
@@ -403,8 +414,8 @@ namespace OnTopReplica.MultiWindow {
                                 }
                             }
 
-                            // --- Icon/graphic detection ---
-                            if (anyIconEnabled) {
+                            // --- Icon/graphic detection (short-circuit once found) ---
+                            if (needIconCheck) {
                                 float iconScore;
                                 bool iconFound = MatchIconTemplate(regionBmp, out iconScore);
                                 mw.LastIconDetected = iconFound;
@@ -414,6 +425,7 @@ namespace OnTopReplica.MultiWindow {
 
                                 if (iconFound) {
                                     allWindowsLostIcon = false;
+                                    needIconCheck = false; // skip icon check for subsequent windows
                                 }
                             }
                         }
