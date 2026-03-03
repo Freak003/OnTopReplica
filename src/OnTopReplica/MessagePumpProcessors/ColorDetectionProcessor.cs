@@ -459,12 +459,95 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// Last resort: CopyFromScreen. May capture overlay but does not flicker.
+        /// Last resort capture. First tries PrintWindow(PW_RENDERFULLCONTENT) on OnTopReplica's own
+        /// ThumbnailPanel — which uses DWM composition and is never occluded — then falls back to
+        /// CopyFromScreen only if that also fails.
         /// </summary>
         private bool DetectColorScreenCapture(IntPtr windowHandle, Rectangle regionRect)
         {
+            // --- 优先方案：PrintWindow 截取 ThumbnailPanel（DWM合成，不受源窗口遮挡影响） ---
+            MainForm mainForm = null;
+            foreach (Form form in Application.OpenForms)
+            {
+                if (form is MainForm mf) { mainForm = mf; break; }
+            }
+
+            if (mainForm != null)
+            {
+                IntPtr panelHandle = IntPtr.Zero;
+                int panelW = 0, panelH = 0;
+                // 必须在 UI 线程上访问控件句柄和尺寸
+                try
+                {
+                    mainForm.Invoke((Action)(() =>
+                    {
+                        var panel = mainForm.ThumbnailPanel;
+                        if (panel != null && panel.IsHandleCreated && panel.Width > 0 && panel.Height > 0)
+                        {
+                            panelHandle = panel.Handle;
+                            panelW = panel.Width;
+                            panelH = panel.Height;
+                        }
+                    }));
+                }
+                catch { /* 窗口可能在关闭，忽略 */ }
+
+                if (panelHandle != IntPtr.Zero)
+                {
+                    IntPtr hdcMem = IntPtr.Zero;
+                    IntPtr hBitmap = IntPtr.Zero;
+                    IntPtr hOldBmp = IntPtr.Zero;
+                    IntPtr hdcScreen = IntPtr.Zero;
+                    Bitmap bmp = null;
+                    try
+                    {
+                        hdcScreen = GetDC(IntPtr.Zero); // 屏幕 DC，用于创建兼容位图
+                        hdcMem = CreateCompatibleDC(hdcScreen);
+                        hBitmap = CreateCompatibleBitmap(hdcScreen, panelW, panelH);
+                        hOldBmp = SelectObject(hdcMem, hBitmap);
+
+                        bool ok = PrintWindow(panelHandle, hdcMem, PW_RENDERFULLCONTENT);
+                        SelectObject(hdcMem, hOldBmp);
+
+                        if (ok)
+                        {
+                            bmp = Bitmap.FromHbitmap(hBitmap);
+                            if (!IsBitmapAllBlack(bmp))
+                            {
+                                Log.Write("ColorDetection ThumbnailPanel: PrintWindow OK, size={0}x{1}", panelW, panelH);
+                                _debugCounter++;
+                                if (_debugCounter % 5 == 1)
+                                    SaveDebugBitmap(bmp, "thumbnail_panel_capture");
+                                // ThumbnailPanel 已显示选定区域内容，直接扫描整个位图
+                                return SampleBitmapForColor(bmp);
+                            }
+                            else
+                            {
+                                Log.Write("ColorDetection ThumbnailPanel: PrintWindow all-black, falling back to CopyFromScreen");
+                            }
+                        }
+                        else
+                        {
+                            Log.Write("ColorDetection ThumbnailPanel: PrintWindow failed, falling back to CopyFromScreen");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Write("ColorDetection ThumbnailPanel error: {0}", ex.Message);
+                    }
+                    finally
+                    {
+                        if (bmp != null) bmp.Dispose();
+                        if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+                        if (hdcMem != IntPtr.Zero) DeleteDC(hdcMem);
+                        if (hdcScreen != IntPtr.Zero) ReleaseDC(IntPtr.Zero, hdcScreen);
+                    }
+                }
+            }
+
+            // --- 最终回退：CopyFromScreen（可能包含遮挡窗口的像素） ---
             var scrRect = WindowManagerMethods.ClientToScreenRect(windowHandle, regionRect);
-            Log.Write("ColorDetection ScreenCapture: screen={0},{1} {2}x{3}", scrRect.X, scrRect.Y, scrRect.Width, scrRect.Height);
+            Log.Write("ColorDetection CopyFromScreen fallback: screen={0},{1} {2}x{3}", scrRect.X, scrRect.Y, scrRect.Width, scrRect.Height);
 
             if (scrRect.Width <= 0 || scrRect.Height <= 0)
                 return false;
@@ -472,28 +555,27 @@ namespace OnTopReplica.MessagePumpProcessors {
             int maxW = Math.Min(scrRect.Width, 800);
             int maxH = Math.Min(scrRect.Height, 600);
 
-            Bitmap bmp = null;
+            Bitmap bmpScreen = null;
             try
             {
-                bmp = new Bitmap(maxW, maxH, PixelFormat.Format32bppArgb);
-                using (Graphics g = Graphics.FromImage(bmp))
+                bmpScreen = new Bitmap(maxW, maxH, PixelFormat.Format32bppArgb);
+                using (Graphics g = Graphics.FromImage(bmpScreen))
                 {
                     g.CopyFromScreen(scrRect.X, scrRect.Y, 0, 0, new Size(maxW, maxH));
                 }
-                // 始终保存截图用于调试（限频：每5次保存1次）
                 _debugCounter++;
                 if (_debugCounter % 5 == 1)
-                    SaveDebugBitmap(bmp, "screen_capture");
-                return SampleBitmapForColor(bmp);
+                    SaveDebugBitmap(bmpScreen, "screen_capture");
+                return SampleBitmapForColor(bmpScreen);
             }
             catch (Exception ex)
             {
-                Log.Write("ColorDetection ScreenCapture error: {0}", ex.Message);
+                Log.Write("ColorDetection CopyFromScreen error: {0}", ex.Message);
                 return false;
             }
             finally
             {
-                if (bmp != null) bmp.Dispose();
+                if (bmpScreen != null) bmpScreen.Dispose();
             }
         }
 
