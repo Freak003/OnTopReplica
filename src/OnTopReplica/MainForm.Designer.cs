@@ -442,8 +442,8 @@
             // 
             this.multiWindowToolStripMenuItem.Name = "multiWindowToolStripMenuItem";
             this.multiWindowToolStripMenuItem.Size = new System.Drawing.Size(186, 22);
-            this.multiWindowToolStripMenuItem.Text = "Multi-Window Monitor";
-            this.multiWindowToolStripMenuItem.ToolTipText = "Monitor multiple windows with synchronized color detection";
+            this.multiWindowToolStripMenuItem.Text = "多窗口监控";
+            this.multiWindowToolStripMenuItem.ToolTipText = "同时监控多个窗口并进行同步颜色检测";
             this.multiWindowToolStripMenuItem.Click += new System.EventHandler(this.Menu_MultiWindow_click);
             // 
             // aboutToolStripMenuItem

@@ -44,9 +44,9 @@ namespace OnTopReplica.SidePanels {
             this.labelHelp.Location = new System.Drawing.Point(0, 0);
             this.labelHelp.Name = "labelHelp";
             this.labelHelp.Padding = new System.Windows.Forms.Padding(6, 4, 6, 4);
-            this.labelHelp.Size = new System.Drawing.Size(320, 45);
+            this.labelHelp.Size = new System.Drawing.Size(460, 40);
             this.labelHelp.TabIndex = 0;
-            this.labelHelp.Text = "Check windows to monitor. Double-click or use \"Set Primary\" to set the preview window. Region is shared across all windows.";
+            this.labelHelp.Text = "勾选要监控的窗口，双击或点【设为主窗口】设置预览窗口，所有窗口共享同一监控区域。";
             // 
             // listWindows
             // 
@@ -58,10 +58,10 @@ namespace OnTopReplica.SidePanels {
             this.listWindows.Dock = System.Windows.Forms.DockStyle.Fill;
             this.listWindows.FullRowSelect = true;
             this.listWindows.HideSelection = false;
-            this.listWindows.Location = new System.Drawing.Point(0, 45);
+            this.listWindows.Location = new System.Drawing.Point(0, 40);
             this.listWindows.MultiSelect = false;
             this.listWindows.Name = "listWindows";
-            this.listWindows.Size = new System.Drawing.Size(320, 255);
+            this.listWindows.Size = new System.Drawing.Size(460, 340);
             this.listWindows.TabIndex = 1;
             this.listWindows.UseCompatibleStateImageBehavior = false;
             this.listWindows.View = System.Windows.Forms.View.Details;
@@ -70,18 +70,18 @@ namespace OnTopReplica.SidePanels {
             // 
             // colName
             // 
-            this.colName.Text = "Window";
-            this.colName.Width = 200;
+            this.colName.Text = "窗口";
+            this.colName.Width = 290;
             // 
             // colStatus
             // 
-            this.colStatus.Text = "Status";
-            this.colStatus.Width = 60;
+            this.colStatus.Text = "状态";
+            this.colStatus.Width = 80;
             // 
             // colPrimary
             // 
-            this.colPrimary.Text = "Primary";
-            this.colPrimary.Width = 50;
+            this.colPrimary.Text = "主窗口";
+            this.colPrimary.Width = 60;
             // 
             // panelButtons
             // 
@@ -92,61 +92,61 @@ namespace OnTopReplica.SidePanels {
             this.panelButtons.Controls.Add(this.btnClose);
             this.panelButtons.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.panelButtons.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
-            this.panelButtons.Location = new System.Drawing.Point(0, 300);
+            this.panelButtons.Location = new System.Drawing.Point(0, 380);
             this.panelButtons.Name = "panelButtons";
             this.panelButtons.Padding = new System.Windows.Forms.Padding(3);
-            this.panelButtons.Size = new System.Drawing.Size(320, 66);
+            this.panelButtons.Size = new System.Drawing.Size(460, 60);
             this.panelButtons.TabIndex = 2;
             // 
             // btnSetPrimary
             // 
-            this.btnSetPrimary.Size = new System.Drawing.Size(90, 25);
+            this.btnSetPrimary.Size = new System.Drawing.Size(85, 28);
             this.btnSetPrimary.Name = "btnSetPrimary";
-            this.btnSetPrimary.Text = "Set Primary";
+            this.btnSetPrimary.Text = "设为主窗口";
             this.btnSetPrimary.UseVisualStyleBackColor = true;
             this.btnSetPrimary.Click += new System.EventHandler(this.btnSetPrimary_Click);
             // 
             // btnStartMonitor
             // 
-            this.btnStartMonitor.Size = new System.Drawing.Size(90, 25);
+            this.btnStartMonitor.Size = new System.Drawing.Size(75, 28);
             this.btnStartMonitor.Name = "btnStartMonitor";
-            this.btnStartMonitor.Text = "Start";
+            this.btnStartMonitor.Text = "开始监控";
             this.btnStartMonitor.UseVisualStyleBackColor = true;
             this.btnStartMonitor.Click += new System.EventHandler(this.btnStartMonitor_Click);
             // 
             // btnStopMonitor
             // 
-            this.btnStopMonitor.Size = new System.Drawing.Size(90, 25);
+            this.btnStopMonitor.Size = new System.Drawing.Size(75, 28);
             this.btnStopMonitor.Name = "btnStopMonitor";
-            this.btnStopMonitor.Text = "Stop";
+            this.btnStopMonitor.Text = "停止监控";
             this.btnStopMonitor.UseVisualStyleBackColor = true;
             this.btnStopMonitor.Click += new System.EventHandler(this.btnStopMonitor_Click);
             // 
             // btnRefresh
             // 
-            this.btnRefresh.Size = new System.Drawing.Size(90, 25);
+            this.btnRefresh.Size = new System.Drawing.Size(60, 28);
             this.btnRefresh.Name = "btnRefresh";
-            this.btnRefresh.Text = "Refresh";
+            this.btnRefresh.Text = "刷新";
             this.btnRefresh.UseVisualStyleBackColor = true;
             this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
             // 
             // btnClose
             // 
-            this.btnClose.Size = new System.Drawing.Size(90, 25);
+            this.btnClose.Size = new System.Drawing.Size(60, 28);
             this.btnClose.Name = "btnClose";
-            this.btnClose.Text = "Close";
+            this.btnClose.Text = "关闭";
             this.btnClose.UseVisualStyleBackColor = true;
             this.btnClose.Click += new System.EventHandler(this.btnClose_Click);
             // 
             // labelStatus
             // 
             this.labelStatus.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.labelStatus.Location = new System.Drawing.Point(0, 366);
+            this.labelStatus.Location = new System.Drawing.Point(0, 440);
             this.labelStatus.Name = "labelStatus";
             this.labelStatus.Padding = new System.Windows.Forms.Padding(6, 2, 6, 2);
-            this.labelStatus.Size = new System.Drawing.Size(320, 24);
+            this.labelStatus.Size = new System.Drawing.Size(460, 24);
             this.labelStatus.TabIndex = 3;
-            this.labelStatus.Text = "Monitored: 0 window(s)";
+            this.labelStatus.Text = "监控中：0 个窗口";
             // 
             // MultiWindowPanel
             // 
@@ -157,7 +157,8 @@ namespace OnTopReplica.SidePanels {
             this.Controls.Add(this.panelButtons);
             this.Controls.Add(this.labelStatus);
             this.Name = "MultiWindowPanel";
-            this.Size = new System.Drawing.Size(320, 390);
+            this.MinimumSize = new System.Drawing.Size(460, 464);
+            this.Size = new System.Drawing.Size(460, 464);
             this.panelButtons.ResumeLayout(false);
             this.ResumeLayout(false);
         }

@@ -25,7 +25,7 @@ namespace OnTopReplica.SidePanels {
         }
 
         public override string Title {
-            get { return "Multi-Window Monitor"; }
+            get { return "多窗口监控"; }
         }
 
         public override void OnFirstShown(MainForm form) {
@@ -177,8 +177,8 @@ namespace OnTopReplica.SidePanels {
         /// </summary>
         private void btnStartMonitor_Click(object sender, EventArgs e) {
             if (_manager.Windows.Count == 0) {
-                MessageBox.Show("Please check at least one window to monitor.",
-                    "Multi-Window Monitor", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("请先勾选至少一个要监控的窗口。",
+                    "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -190,8 +190,8 @@ namespace OnTopReplica.SidePanels {
             catch { }
 
             if (processor == null || !processor.Enabled) {
-                MessageBox.Show("Please enable Color Alert first (it provides the color detection settings).",
-                    "Multi-Window Monitor", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("请先在颜色警报面板中启用颜色检测功能。",
+                    "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -234,8 +234,8 @@ namespace OnTopReplica.SidePanels {
         private void UpdateStatus() {
             int total = _manager.Windows.Count;
             var primary = _manager.PrimaryWindow;
-            string primaryName = primary != null ? primary.Title : "(none)";
-            labelStatus.Text = string.Format("Monitored: {0} window(s) | Primary: {1}",
+            string primaryName = primary != null ? primary.Title : "（无）";
+            labelStatus.Text = string.Format("监控中：{0} 个窗口  |  主窗口：{1}",
                 total, primaryName);
         }
     }
