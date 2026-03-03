@@ -215,6 +215,7 @@
     </Compile>
     <Compile Include="MultiWindow\MonitoredWindow.cs" />
     <Compile Include="MultiWindow\MultiWindowManager.cs" />
+    <Compile Include="SidePanels\IconCaptureDialog.cs" />
     <Compile Include="StartupOptions\FourValueTypeConverter.cs" />
     <Compile Include="StartupOptions\PaddingConverter.cs" />
     <Compile Include="Strings.zh-TW.Designer.cs">

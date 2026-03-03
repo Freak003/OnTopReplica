@@ -8,7 +8,6 @@ namespace OnTopReplica.SidePanels {
         /// <summary> 
         /// Clean up any resources being used.
         /// </summary>
-        /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
         protected override void Dispose(bool disposing) {
             if (disposing && (components != null)) {
                 components.Dispose();
@@ -18,10 +17,6 @@ namespace OnTopReplica.SidePanels {
 
         #region Component Designer generated code
 
-        /// <summary> 
-        /// Required method for Designer support - do not modify 
-        /// the contents of this method with the code editor.
-        /// </summary>
         private void InitializeComponent() {
             this.listWindows = new System.Windows.Forms.ListView();
             this.colName = new System.Windows.Forms.ColumnHeader();
@@ -35,131 +30,265 @@ namespace OnTopReplica.SidePanels {
             this.labelStatus = new System.Windows.Forms.Label();
             this.labelHelp = new System.Windows.Forms.Label();
             this.panelButtons = new System.Windows.Forms.FlowLayoutPanel();
+            // Color detection controls
+            this.grpColor = new System.Windows.Forms.GroupBox();
+            this.chkColorEnabled = new System.Windows.Forms.CheckBox();
+            this.chkRed = new System.Windows.Forms.CheckBox();
+            this.chkOrange = new System.Windows.Forms.CheckBox();
+            this.chkGray = new System.Windows.Forms.CheckBox();
+            // Icon detection controls
+            this.grpIcon = new System.Windows.Forms.GroupBox();
+            this.chkIconEnabled = new System.Windows.Forms.CheckBox();
+            this.btnCaptureIcon = new System.Windows.Forms.Button();
+            this.btnLoadIcon = new System.Windows.Forms.Button();
+            this.btnClearIcon = new System.Windows.Forms.Button();
+            this.picIconPreview = new System.Windows.Forms.PictureBox();
+            this.lblIconStatus = new System.Windows.Forms.Label();
+            // Bottom panel
+            this.panelBottom = new System.Windows.Forms.Panel();
+
             this.panelButtons.SuspendLayout();
+            this.grpColor.SuspendLayout();
+            this.grpIcon.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.picIconPreview)).BeginInit();
+            this.panelBottom.SuspendLayout();
             this.SuspendLayout();
-            // 
-            // labelHelp
-            // 
+
+            // =============================================
+            // labelHelp (Top)
+            // =============================================
             this.labelHelp.Dock = System.Windows.Forms.DockStyle.Top;
             this.labelHelp.Location = new System.Drawing.Point(0, 0);
             this.labelHelp.Name = "labelHelp";
             this.labelHelp.Padding = new System.Windows.Forms.Padding(6, 4, 6, 4);
-            this.labelHelp.Size = new System.Drawing.Size(460, 40);
+            this.labelHelp.Size = new System.Drawing.Size(500, 36);
             this.labelHelp.TabIndex = 0;
             this.labelHelp.Text = "勾选要监控的窗口，双击或点【设为主窗口】设置预览窗口，所有窗口共享同一监控区域。";
-            // 
-            // listWindows
-            // 
+
+            // =============================================
+            // listWindows (Fill)
+            // =============================================
             this.listWindows.CheckBoxes = true;
             this.listWindows.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] {
-                this.colName,
-                this.colStatus,
-                this.colPrimary});
+                this.colName, this.colStatus, this.colPrimary});
             this.listWindows.Dock = System.Windows.Forms.DockStyle.Fill;
             this.listWindows.FullRowSelect = true;
             this.listWindows.HideSelection = false;
-            this.listWindows.Location = new System.Drawing.Point(0, 40);
+            this.listWindows.Location = new System.Drawing.Point(0, 36);
             this.listWindows.MultiSelect = false;
             this.listWindows.Name = "listWindows";
-            this.listWindows.Size = new System.Drawing.Size(460, 340);
+            this.listWindows.Size = new System.Drawing.Size(500, 230);
             this.listWindows.TabIndex = 1;
             this.listWindows.UseCompatibleStateImageBehavior = false;
             this.listWindows.View = System.Windows.Forms.View.Details;
             this.listWindows.ItemCheck += new System.Windows.Forms.ItemCheckEventHandler(this.listWindows_ItemCheck);
             this.listWindows.DoubleClick += new System.EventHandler(this.listWindows_DoubleClick);
-            // 
-            // colName
-            // 
+            //
             this.colName.Text = "窗口";
-            this.colName.Width = 290;
-            // 
-            // colStatus
-            // 
+            this.colName.Width = 310;
             this.colStatus.Text = "状态";
             this.colStatus.Width = 80;
-            // 
-            // colPrimary
-            // 
             this.colPrimary.Text = "主窗口";
             this.colPrimary.Width = 60;
-            // 
+
+            // =============================================
+            // panelBottom (Bottom - holds settings + buttons + status)
+            // =============================================
+            this.panelBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.panelBottom.Location = new System.Drawing.Point(0, 266);
+            this.panelBottom.Name = "panelBottom";
+            this.panelBottom.Size = new System.Drawing.Size(500, 334);
+            this.panelBottom.TabIndex = 10;
+            this.panelBottom.Controls.Add(this.grpColor);
+            this.panelBottom.Controls.Add(this.grpIcon);
+            this.panelBottom.Controls.Add(this.panelButtons);
+            this.panelBottom.Controls.Add(this.labelStatus);
+
+            // =============================================
+            // grpColor - Color Detection Group
+            // =============================================
+            this.grpColor.Location = new System.Drawing.Point(6, 4);
+            this.grpColor.Name = "grpColor";
+            this.grpColor.Size = new System.Drawing.Size(488, 70);
+            this.grpColor.TabIndex = 0;
+            this.grpColor.TabStop = false;
+            this.grpColor.Text = "颜色检测";
+            this.grpColor.Controls.Add(this.chkColorEnabled);
+            this.grpColor.Controls.Add(this.chkRed);
+            this.grpColor.Controls.Add(this.chkOrange);
+            this.grpColor.Controls.Add(this.chkGray);
+            //
+            this.chkColorEnabled.Location = new System.Drawing.Point(12, 20);
+            this.chkColorEnabled.Name = "chkColorEnabled";
+            this.chkColorEnabled.Size = new System.Drawing.Size(90, 20);
+            this.chkColorEnabled.Text = "启用";
+            this.chkColorEnabled.TabIndex = 0;
+            this.chkColorEnabled.CheckedChanged += new System.EventHandler(this.chkColorEnabled_CheckedChanged);
+            //
+            this.chkRed.Location = new System.Drawing.Point(12, 44);
+            this.chkRed.Name = "chkRed";
+            this.chkRed.Size = new System.Drawing.Size(70, 20);
+            this.chkRed.Text = "红色";
+            this.chkRed.ForeColor = System.Drawing.Color.Red;
+            this.chkRed.TabIndex = 1;
+            this.chkRed.Enabled = false;
+            this.chkRed.CheckedChanged += new System.EventHandler(this.chkRed_CheckedChanged);
+            //
+            this.chkOrange.Location = new System.Drawing.Point(90, 44);
+            this.chkOrange.Name = "chkOrange";
+            this.chkOrange.Size = new System.Drawing.Size(70, 20);
+            this.chkOrange.Text = "橙色";
+            this.chkOrange.ForeColor = System.Drawing.Color.OrangeRed;
+            this.chkOrange.TabIndex = 2;
+            this.chkOrange.Enabled = false;
+            this.chkOrange.CheckedChanged += new System.EventHandler(this.chkOrange_CheckedChanged);
+            //
+            this.chkGray.Location = new System.Drawing.Point(168, 44);
+            this.chkGray.Name = "chkGray";
+            this.chkGray.Size = new System.Drawing.Size(70, 20);
+            this.chkGray.Text = "灰色";
+            this.chkGray.ForeColor = System.Drawing.Color.Gray;
+            this.chkGray.TabIndex = 3;
+            this.chkGray.Enabled = false;
+            this.chkGray.CheckedChanged += new System.EventHandler(this.chkGray_CheckedChanged);
+
+            // =============================================
+            // grpIcon - Icon/Graphic Detection Group
+            // =============================================
+            this.grpIcon.Location = new System.Drawing.Point(6, 78);
+            this.grpIcon.Name = "grpIcon";
+            this.grpIcon.Size = new System.Drawing.Size(488, 190);
+            this.grpIcon.TabIndex = 1;
+            this.grpIcon.TabStop = false;
+            this.grpIcon.Text = "图形检测（图形从所有窗口消失时报警）";
+            this.grpIcon.Controls.Add(this.chkIconEnabled);
+            this.grpIcon.Controls.Add(this.btnCaptureIcon);
+            this.grpIcon.Controls.Add(this.btnLoadIcon);
+            this.grpIcon.Controls.Add(this.btnClearIcon);
+            this.grpIcon.Controls.Add(this.picIconPreview);
+            this.grpIcon.Controls.Add(this.lblIconStatus);
+            //
+            this.chkIconEnabled.Location = new System.Drawing.Point(12, 22);
+            this.chkIconEnabled.Name = "chkIconEnabled";
+            this.chkIconEnabled.Size = new System.Drawing.Size(90, 20);
+            this.chkIconEnabled.Text = "启用";
+            this.chkIconEnabled.TabIndex = 0;
+            this.chkIconEnabled.CheckedChanged += new System.EventHandler(this.chkIconEnabled_CheckedChanged);
+            //
+            this.btnCaptureIcon.Location = new System.Drawing.Point(12, 48);
+            this.btnCaptureIcon.Name = "btnCaptureIcon";
+            this.btnCaptureIcon.Size = new System.Drawing.Size(100, 28);
+            this.btnCaptureIcon.Text = "从预览截取";
+            this.btnCaptureIcon.UseVisualStyleBackColor = true;
+            this.btnCaptureIcon.Enabled = false;
+            this.btnCaptureIcon.TabIndex = 1;
+            this.btnCaptureIcon.Click += new System.EventHandler(this.btnCaptureIcon_Click);
+            //
+            this.btnLoadIcon.Location = new System.Drawing.Point(118, 48);
+            this.btnLoadIcon.Name = "btnLoadIcon";
+            this.btnLoadIcon.Size = new System.Drawing.Size(100, 28);
+            this.btnLoadIcon.Text = "从文件加载";
+            this.btnLoadIcon.UseVisualStyleBackColor = true;
+            this.btnLoadIcon.Enabled = false;
+            this.btnLoadIcon.TabIndex = 2;
+            this.btnLoadIcon.Click += new System.EventHandler(this.btnLoadIcon_Click);
+            //
+            this.btnClearIcon.Location = new System.Drawing.Point(224, 48);
+            this.btnClearIcon.Name = "btnClearIcon";
+            this.btnClearIcon.Size = new System.Drawing.Size(80, 28);
+            this.btnClearIcon.Text = "清除模板";
+            this.btnClearIcon.UseVisualStyleBackColor = true;
+            this.btnClearIcon.Enabled = false;
+            this.btnClearIcon.TabIndex = 3;
+            this.btnClearIcon.Click += new System.EventHandler(this.btnClearIcon_Click);
+            //
+            this.picIconPreview.Location = new System.Drawing.Point(12, 82);
+            this.picIconPreview.Name = "picIconPreview";
+            this.picIconPreview.Size = new System.Drawing.Size(100, 100);
+            this.picIconPreview.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.picIconPreview.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this.picIconPreview.BackColor = System.Drawing.Color.FromArgb(40, 40, 40);
+            this.picIconPreview.TabIndex = 4;
+            this.picIconPreview.TabStop = false;
+            //
+            this.lblIconStatus.Location = new System.Drawing.Point(118, 88);
+            this.lblIconStatus.Name = "lblIconStatus";
+            this.lblIconStatus.Size = new System.Drawing.Size(360, 60);
+            this.lblIconStatus.TabIndex = 5;
+            this.lblIconStatus.Text = "未设置模板\n\n当参考图形从所有监控窗口的监控区域中消失时，将触发提示音。";
+
+            // =============================================
             // panelButtons
-            // 
+            // =============================================
             this.panelButtons.Controls.Add(this.btnSetPrimary);
             this.panelButtons.Controls.Add(this.btnStartMonitor);
             this.panelButtons.Controls.Add(this.btnStopMonitor);
             this.panelButtons.Controls.Add(this.btnRefresh);
             this.panelButtons.Controls.Add(this.btnClose);
-            this.panelButtons.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.panelButtons.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
-            this.panelButtons.Location = new System.Drawing.Point(0, 380);
+            this.panelButtons.Location = new System.Drawing.Point(0, 272);
             this.panelButtons.Name = "panelButtons";
+            this.panelButtons.FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight;
             this.panelButtons.Padding = new System.Windows.Forms.Padding(3);
-            this.panelButtons.Size = new System.Drawing.Size(460, 60);
+            this.panelButtons.Size = new System.Drawing.Size(500, 36);
             this.panelButtons.TabIndex = 2;
-            // 
-            // btnSetPrimary
-            // 
+            //
             this.btnSetPrimary.Size = new System.Drawing.Size(85, 28);
             this.btnSetPrimary.Name = "btnSetPrimary";
             this.btnSetPrimary.Text = "设为主窗口";
             this.btnSetPrimary.UseVisualStyleBackColor = true;
             this.btnSetPrimary.Click += new System.EventHandler(this.btnSetPrimary_Click);
-            // 
-            // btnStartMonitor
-            // 
+            //
             this.btnStartMonitor.Size = new System.Drawing.Size(75, 28);
             this.btnStartMonitor.Name = "btnStartMonitor";
             this.btnStartMonitor.Text = "开始监控";
             this.btnStartMonitor.UseVisualStyleBackColor = true;
             this.btnStartMonitor.Click += new System.EventHandler(this.btnStartMonitor_Click);
-            // 
-            // btnStopMonitor
-            // 
+            //
             this.btnStopMonitor.Size = new System.Drawing.Size(75, 28);
             this.btnStopMonitor.Name = "btnStopMonitor";
             this.btnStopMonitor.Text = "停止监控";
             this.btnStopMonitor.UseVisualStyleBackColor = true;
             this.btnStopMonitor.Click += new System.EventHandler(this.btnStopMonitor_Click);
-            // 
-            // btnRefresh
-            // 
+            //
             this.btnRefresh.Size = new System.Drawing.Size(60, 28);
             this.btnRefresh.Name = "btnRefresh";
             this.btnRefresh.Text = "刷新";
             this.btnRefresh.UseVisualStyleBackColor = true;
             this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
-            // 
-            // btnClose
-            // 
+            //
             this.btnClose.Size = new System.Drawing.Size(60, 28);
             this.btnClose.Name = "btnClose";
             this.btnClose.Text = "关闭";
             this.btnClose.UseVisualStyleBackColor = true;
             this.btnClose.Click += new System.EventHandler(this.btnClose_Click);
-            // 
+
+            // =============================================
             // labelStatus
-            // 
-            this.labelStatus.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.labelStatus.Location = new System.Drawing.Point(0, 440);
+            // =============================================
+            this.labelStatus.Location = new System.Drawing.Point(0, 310);
             this.labelStatus.Name = "labelStatus";
             this.labelStatus.Padding = new System.Windows.Forms.Padding(6, 2, 6, 2);
-            this.labelStatus.Size = new System.Drawing.Size(460, 24);
+            this.labelStatus.Size = new System.Drawing.Size(500, 24);
             this.labelStatus.TabIndex = 3;
             this.labelStatus.Text = "监控中：0 个窗口";
-            // 
+
+            // =============================================
             // MultiWindowPanel
-            // 
+            // =============================================
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.listWindows);
             this.Controls.Add(this.labelHelp);
-            this.Controls.Add(this.panelButtons);
-            this.Controls.Add(this.labelStatus);
+            this.Controls.Add(this.panelBottom);
             this.Name = "MultiWindowPanel";
-            this.MinimumSize = new System.Drawing.Size(460, 464);
-            this.Size = new System.Drawing.Size(460, 464);
+            this.MinimumSize = new System.Drawing.Size(500, 600);
+            this.Size = new System.Drawing.Size(500, 600);
+
             this.panelButtons.ResumeLayout(false);
+            this.grpColor.ResumeLayout(false);
+            this.grpIcon.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)(this.picIconPreview)).EndInit();
+            this.panelBottom.ResumeLayout(false);
             this.ResumeLayout(false);
         }
 
@@ -177,5 +306,20 @@ namespace OnTopReplica.SidePanels {
         private System.Windows.Forms.Label labelStatus;
         private System.Windows.Forms.Label labelHelp;
         private System.Windows.Forms.FlowLayoutPanel panelButtons;
+        private System.Windows.Forms.Panel panelBottom;
+        // Color detection
+        private System.Windows.Forms.GroupBox grpColor;
+        private System.Windows.Forms.CheckBox chkColorEnabled;
+        private System.Windows.Forms.CheckBox chkRed;
+        private System.Windows.Forms.CheckBox chkOrange;
+        private System.Windows.Forms.CheckBox chkGray;
+        // Icon detection
+        private System.Windows.Forms.GroupBox grpIcon;
+        private System.Windows.Forms.CheckBox chkIconEnabled;
+        private System.Windows.Forms.Button btnCaptureIcon;
+        private System.Windows.Forms.Button btnLoadIcon;
+        private System.Windows.Forms.Button btnClearIcon;
+        private System.Windows.Forms.PictureBox picIconPreview;
+        private System.Windows.Forms.Label lblIconStatus;
     }
 }

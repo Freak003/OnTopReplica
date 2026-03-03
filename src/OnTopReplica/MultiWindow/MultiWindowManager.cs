@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -14,7 +15,8 @@ namespace OnTopReplica.MultiWindow {
     /// Manages multiple monitored windows. Coordinates:
     /// - Primary window selection (displayed in ThumbnailPanel preview)
     /// - Region synchronization (all windows use the primary window's region)
-    /// - Multi-window color detection (reuses ColorDetectionProcessor logic)
+    /// - Independent color detection (own enabled categories, not tied to ColorDetectionProcessor)
+    /// - Icon/graphic template detection with disappearance alarm
     /// </summary>
     class MultiWindowManager : IDisposable {
 
@@ -63,6 +65,28 @@ namespace OnTopReplica.MultiWindow {
         private System.Threading.Thread _detectionThread;
         private int _sampleInterval = 500;
 
+        // Independent color detection settings
+        private readonly HashSet<ColorCategory> _enabledCategories = new HashSet<ColorCategory>();
+        private bool _colorDetectionEnabled = false;
+
+        // Icon/graphic template detection
+        private Bitmap _iconTemplate = null;
+        private byte[] _iconTemplatePixels = null;
+        private int _iconTemplateW = 0;
+        private int _iconTemplateH = 0;
+        private int _iconTemplateStride = 0;
+        private bool _iconDetectionEnabled = false;
+        private float _iconMatchThreshold = 0.85f; // 85% similarity required
+        private volatile bool _iconAlarmActive = false;
+
+        // Sound for icon disappearance alarm  
+        private string _alarmSoundFile = string.Empty;
+        private float _alarmVolume = 1.0f;
+        private System.Windows.Media.MediaPlayer _mediaPlayer;
+        private System.Windows.Threading.Dispatcher _uiDispatcher;
+        private System.Threading.Timer _alarmStopTimer;
+        private const int AlarmDuration = 5000;
+
         /// <summary>
         /// Reference to the MainForm (set when enabled).
         /// </summary>
@@ -89,11 +113,129 @@ namespace OnTopReplica.MultiWindow {
             get { return _windows.Count > 0; }
         }
 
+        #region Independent Color Detection Settings
+
         /// <summary>
-        /// Fired when any secondary window's color detection triggers an alarm.
-        /// The parameter is the MonitoredWindow that matched.
+        /// Gets the independently managed set of enabled color categories.
+        /// </summary>
+        public HashSet<ColorCategory> EnabledCategories {
+            get { return _enabledCategories; }
+        }
+
+        /// <summary>
+        /// Gets or sets whether color detection is enabled for multi-window monitoring.
+        /// </summary>
+        public bool ColorDetectionEnabled {
+            get { return _colorDetectionEnabled; }
+            set { _colorDetectionEnabled = value; }
+        }
+
+        /// <summary>
+        /// Sets a color category enabled or disabled.
+        /// </summary>
+        public void SetCategoryEnabled(ColorCategory category, bool enabled) {
+            if (enabled)
+                _enabledCategories.Add(category);
+            else
+                _enabledCategories.Remove(category);
+        }
+
+        #endregion
+
+        #region Icon Template Detection Settings
+
+        /// <summary>
+        /// Gets or sets whether icon/graphic template detection is enabled.
+        /// </summary>
+        public bool IconDetectionEnabled {
+            get { return _iconDetectionEnabled; }
+            set { _iconDetectionEnabled = value; }
+        }
+
+        /// <summary>
+        /// Gets the current icon template bitmap (for display in UI).
+        /// </summary>
+        public Bitmap IconTemplate {
+            get { return _iconTemplate; }
+        }
+
+        /// <summary>
+        /// Gets or sets the match threshold (0.0-1.0). Higher = stricter matching.
+        /// </summary>
+        public float IconMatchThreshold {
+            get { return _iconMatchThreshold; }
+            set { _iconMatchThreshold = Math.Max(0.5f, Math.Min(1.0f, value)); }
+        }
+
+        /// <summary>
+        /// Gets or sets the alarm sound file path.
+        /// </summary>
+        public string AlarmSoundFile {
+            get { return _alarmSoundFile; }
+            set { _alarmSoundFile = value ?? string.Empty; }
+        }
+
+        /// <summary>
+        /// Gets or sets the alarm volume (0.0 to 1.0).
+        /// </summary>
+        public float AlarmVolume {
+            get { return _alarmVolume; }
+            set { _alarmVolume = Math.Max(0, Math.Min(1, value)); }
+        }
+
+        /// <summary>
+        /// Sets the icon template from a bitmap. Pre-computes pixel data for fast matching.
+        /// </summary>
+        public void SetIconTemplate(Bitmap template) {
+            if (_iconTemplate != null) {
+                _iconTemplate.Dispose();
+                _iconTemplate = null;
+            }
+            _iconTemplatePixels = null;
+
+            if (template == null || template.Width <= 0 || template.Height <= 0)
+                return;
+
+            _iconTemplate = new Bitmap(template);
+            _iconTemplateW = _iconTemplate.Width;
+            _iconTemplateH = _iconTemplate.Height;
+
+            // Pre-compute pixel array for fast matching
+            BitmapData data = null;
+            try {
+                data = _iconTemplate.LockBits(
+                    new Rectangle(0, 0, _iconTemplateW, _iconTemplateH),
+                    ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                _iconTemplateStride = data.Stride;
+                int byteCount = _iconTemplateStride * _iconTemplateH;
+                _iconTemplatePixels = new byte[byteCount];
+                Marshal.Copy(data.Scan0, _iconTemplatePixels, 0, byteCount);
+            }
+            finally {
+                if (data != null) _iconTemplate.UnlockBits(data);
+            }
+
+            Log.Write("MultiWindowManager: Icon template set, {0}x{1}", _iconTemplateW, _iconTemplateH);
+        }
+
+        #endregion
+
+        /// <summary>
+        /// Captures the UI dispatcher for sound playback (call on UI thread).
+        /// </summary>
+        public void CaptureUIDispatcher() {
+            _uiDispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        }
+
+        /// <summary>
+        /// Fired when any window's color detection triggers an alarm.
         /// </summary>
         public event Action<MonitoredWindow> AlarmTriggered;
+
+        /// <summary>
+        /// Fired when the icon disappears from ALL monitored windows.
+        /// </summary>
+        public event Action IconDisappearedAlarm;
 
         /// <summary>
         /// Fired when the monitored window list changes.
@@ -102,16 +244,13 @@ namespace OnTopReplica.MultiWindow {
 
         /// <summary>
         /// Adds a window to the monitored list.
-        /// If this is the first window, it becomes primary automatically.
         /// </summary>
         public void AddWindow(WindowHandle handle) {
             if (handle == null) return;
-            // Avoid duplicates
             if (_windows.Any(w => w.WindowHandle.Handle == handle.Handle))
                 return;
 
             var mw = new MonitoredWindow(handle);
-
             if (_windows.Count == 0)
                 mw.IsPrimary = true;
 
@@ -124,7 +263,6 @@ namespace OnTopReplica.MultiWindow {
 
         /// <summary>
         /// Removes a window from the monitored list.
-        /// If the removed window was primary, the first remaining window becomes primary.
         /// </summary>
         public void RemoveWindow(WindowHandle handle) {
             if (handle == null) return;
@@ -155,16 +293,12 @@ namespace OnTopReplica.MultiWindow {
             WindowListChanged?.Invoke();
         }
 
-        /// <summary>
-        /// Updates the ThumbnailPanel to show the current primary window.
-        /// </summary>
         private void SwitchPrimaryToThumbnail() {
             var primary = PrimaryWindow;
             if (primary == null || Form == null) return;
 
             try {
                 Form.SetThumbnail(primary.WindowHandle, null);
-                // Re-apply the current region if one exists
                 var region = Form.SelectedThumbnailRegion;
                 if (region != null) {
                     Form.SelectedThumbnailRegion = region;
@@ -185,11 +319,10 @@ namespace OnTopReplica.MultiWindow {
             WindowListChanged?.Invoke();
         }
 
-        #region Multi-window Color Detection
+        #region Detection Thread
 
         /// <summary>
-        /// Starts background color detection for all non-primary monitored windows.
-        /// Reuses the ColorDetectionProcessor's classification logic.
+        /// Starts background detection for all monitored windows.
         /// </summary>
         public void StartDetection() {
             if (_detectionThread != null && _detectionThread.IsAlive)
@@ -201,49 +334,41 @@ namespace OnTopReplica.MultiWindow {
                 Name = "MultiWindowDetection"
             };
             _detectionThread.Start();
-            Log.Write("MultiWindowManager: Detection thread started, monitoring {0} windows",
-                _windows.Count);
+            Log.Write("MultiWindowManager: Detection started, windows={0}, color={1}, icon={2}",
+                _windows.Count, _colorDetectionEnabled, _iconDetectionEnabled);
         }
 
         /// <summary>
-        /// Stops background color detection.
+        /// Stops background detection.
         /// </summary>
         public void StopDetection() {
             _detectionRunning = false;
-            Log.Write("MultiWindowManager: Detection thread stop requested");
+            StopAlarm();
+            Log.Write("MultiWindowManager: Detection stop requested");
         }
 
         /// <summary>
-        /// Background detection loop. Iterates all non-primary windows and checks for color matches.
+        /// Background detection loop.
         /// </summary>
         private void DetectionLoop() {
             while (_detectionRunning) {
                 System.Threading.Thread.Sleep(_sampleInterval);
                 if (!_detectionRunning) break;
 
-                // Get the region from the primary window's current region (synchronized across all windows)
                 Rectangle regionRect = GetCurrentRegion();
 
-                // Get color detection settings from ColorDetectionProcessor
-                ColorDetectionProcessor processor = null;
-                try {
-                    if (Form != null)
-                        processor = Form.MessagePumpManager.Get<ColorDetectionProcessor>();
-                }
-                catch { }
+                bool anyColorEnabled = _colorDetectionEnabled && _enabledCategories.Count > 0;
+                bool anyIconEnabled = _iconDetectionEnabled && _iconTemplatePixels != null;
 
-                if (processor == null || !processor.Enabled) continue;
+                if (!anyColorEnabled && !anyIconEnabled) continue;
 
-                var enabledCategories = processor.EnabledCategories;
-                if (enabledCategories == null || enabledCategories.Count == 0) continue;
+                // Track icon presence across ALL windows for disappearance alarm
+                bool allWindowsLostIcon = anyIconEnabled;
+                int iconCheckedCount = 0;
 
-                // Scan each non-primary window
                 foreach (var mw in _windows.ToArray()) {
                     if (!_detectionRunning) break;
-                    if (mw.IsPrimary) continue; // Primary window is handled by ColorDetectionProcessor
-                    if (!mw.IsColorDetectionEnabled) continue;
 
-                    // Verify window is still valid
                     if (!IsWindow(mw.WindowHandle.Handle)) {
                         Log.Write("MultiWindowManager: Window '{0}' no longer valid, removing", mw.Title);
                         _windows.Remove(mw);
@@ -252,18 +377,54 @@ namespace OnTopReplica.MultiWindow {
                     }
 
                     try {
-                        bool match = DetectColorInWindow(mw.WindowHandle.Handle, regionRect, enabledCategories);
-                        mw.LastDetectionResult = match;
-                        mw.LastDetectionTime = DateTime.Now;
+                        // Capture the region bitmap once for both checks
+                        Bitmap regionBmp = CaptureWindowRegion(mw.WindowHandle.Handle, regionRect);
+                        if (regionBmp == null) continue;
 
-                        if (match) {
-                            Log.Write("MultiWindowManager: Color match in '{0}'!", mw.Title);
-                            AlarmTriggered?.Invoke(mw);
+                        try {
+                            // --- Color detection ---
+                            if (anyColorEnabled && mw.IsColorDetectionEnabled) {
+                                bool colorMatch = ScanBitmapForColor(regionBmp, _enabledCategories);
+                                mw.LastDetectionResult = colorMatch;
+                                mw.LastDetectionTime = DateTime.Now;
+
+                                if (colorMatch) {
+                                    Log.Write("MultiWindowManager: Color match in '{0}'!", mw.Title);
+                                    AlarmTriggered?.Invoke(mw);
+                                }
+                            }
+
+                            // --- Icon/graphic detection ---
+                            if (anyIconEnabled) {
+                                bool iconFound = MatchIconTemplate(regionBmp);
+                                mw.LastIconDetected = iconFound;
+                                iconCheckedCount++;
+
+                                if (iconFound) {
+                                    allWindowsLostIcon = false;
+                                }
+                            }
+                        }
+                        finally {
+                            regionBmp.Dispose();
                         }
                     }
                     catch (Exception ex) {
                         Log.Write("MultiWindowManager: Detection error for '{0}': {1}", mw.Title, ex.Message);
                     }
+                }
+
+                // Icon disappearance alarm: triggers when icon is gone from ALL windows
+                if (anyIconEnabled && iconCheckedCount > 0 && allWindowsLostIcon) {
+                    if (!_iconAlarmActive) {
+                        _iconAlarmActive = true;
+                        Log.Write("MultiWindowManager: Icon disappeared from ALL {0} windows! Alarm!", iconCheckedCount);
+                        PlayIconDisappearAlarm();
+                        IconDisappearedAlarm?.Invoke();
+                    }
+                }
+                else {
+                    _iconAlarmActive = false;
                 }
             }
             Log.Write("MultiWindowManager: Detection thread exited");
@@ -282,7 +443,6 @@ namespace OnTopReplica.MultiWindow {
                 var primary = PrimaryWindow;
                 if (primary == null) return Rectangle.Empty;
 
-                // Get client size of primary window
                 Rectangle clientRect;
                 WindowManagerMethods.GetClientRect(primary.WindowHandle.Handle, out clientRect);
                 var clientSize = new Size(clientRect.Width, clientRect.Height);
@@ -294,43 +454,35 @@ namespace OnTopReplica.MultiWindow {
             }
         }
 
-        /// <summary>
-        /// Detects color in a specific window, reusing ColorDetectionProcessor's classification logic.
-        /// Uses PrintWindow API to capture the window regardless of occlusion.
-        /// </summary>
-        private bool DetectColorInWindow(IntPtr hwnd, Rectangle regionRect,
-            HashSet<ColorCategory> enabledCategories) {
+        #endregion
 
-            // Get window client size
+        #region Window Capture
+
+        /// <summary>
+        /// Captures the specified region of a window into a Bitmap. Caller must dispose.
+        /// </summary>
+        private Bitmap CaptureWindowRegion(IntPtr hwnd, Rectangle regionRect) {
             Rectangle clientRect;
             if (!WindowManagerMethods.GetClientRect(hwnd, out clientRect))
-                return false;
+                return null;
 
             int clientW = clientRect.Width;
             int clientH = clientRect.Height;
-            if (clientW <= 0 || clientH <= 0) return false;
+            if (clientW <= 0 || clientH <= 0) return null;
 
-            // If no region specified, use full client area
-            if (regionRect.IsEmpty) {
+            if (regionRect.IsEmpty)
                 regionRect = new Rectangle(0, 0, clientW, clientH);
-            }
 
-            // Clamp region to client area
             regionRect = Rectangle.Intersect(regionRect, new Rectangle(0, 0, clientW, clientH));
-            if (regionRect.Width <= 0 || regionRect.Height <= 0) return false;
+            if (regionRect.Width <= 0 || regionRect.Height <= 0) return null;
 
-            // Capture using PrintWindow
             Bitmap windowBmp = null;
-            Bitmap regionBmp = null;
             try {
-                // Try PrintWindow to capture window content (occlusion-independent)
                 Rectangle windowRect;
                 WindowManagerMethods.GetWindowRect(hwnd, out windowRect);
                 int windowWidth = windowRect.Width - windowRect.X;
                 int windowHeight = windowRect.Height - windowRect.Y;
-
-                if (windowWidth <= 0 || windowHeight <= 0)
-                    return false;
+                if (windowWidth <= 0 || windowHeight <= 0) return null;
 
                 windowBmp = new Bitmap(windowWidth, windowHeight, PixelFormat.Format32bppArgb);
                 bool printSuccess = false;
@@ -339,22 +491,17 @@ namespace OnTopReplica.MultiWindow {
                 foreach (uint flag in flags) {
                     using (Graphics g = Graphics.FromImage(windowBmp)) {
                         IntPtr hdc = g.GetHdc();
-                        try {
-                            printSuccess = PrintWindow(hwnd, hdc, flag);
-                        }
-                        finally {
-                            g.ReleaseHdc(hdc);
-                        }
+                        try { printSuccess = PrintWindow(hwnd, hdc, flag); }
+                        finally { g.ReleaseHdc(hdc); }
                     }
                     if (printSuccess) break;
                 }
 
                 if (!printSuccess) {
-                    // Fallback: BitBlt from window DC
-                    return DetectColorFallback(hwnd, regionRect, enabledCategories);
+                    windowBmp.Dispose();
+                    return CaptureWindowRegionFallback(hwnd, regionRect);
                 }
 
-                // Calculate client offset in window bitmap
                 var clientOriginScreen = WindowManagerMethods.ClientToScreen(hwnd, new NPoint(0, 0));
                 int clientOffsetX = clientOriginScreen.X - windowRect.X;
                 int clientOffsetY = clientOriginScreen.Y - windowRect.Y;
@@ -364,38 +511,33 @@ namespace OnTopReplica.MultiWindow {
                 int cropW = Math.Min(regionRect.Width, windowWidth - cropX);
                 int cropH = Math.Min(regionRect.Height, windowHeight - cropY);
 
-                if (cropW <= 0 || cropH <= 0) return false;
+                if (cropW <= 0 || cropH <= 0) {
+                    windowBmp.Dispose();
+                    return null;
+                }
 
-                regionBmp = windowBmp.Clone(new Rectangle(cropX, cropY, cropW, cropH),
+                Bitmap regionBmp = windowBmp.Clone(
+                    new Rectangle(cropX, cropY, cropW, cropH),
                     PixelFormat.Format32bppArgb);
-
-                return ScanBitmapForColor(regionBmp, enabledCategories);
+                windowBmp.Dispose();
+                return regionBmp;
             }
-            catch (Exception ex) {
-                Log.Write("MultiWindowManager DetectColor error: {0}", ex.Message);
-                return false;
-            }
-            finally {
-                if (regionBmp != null) regionBmp.Dispose();
+            catch {
                 if (windowBmp != null) windowBmp.Dispose();
+                return null;
             }
         }
 
-        /// <summary>
-        /// Fallback: BitBlt from window DC.
-        /// </summary>
-        private bool DetectColorFallback(IntPtr hwnd, Rectangle regionRect,
-            HashSet<ColorCategory> enabledCategories) {
+        private Bitmap CaptureWindowRegionFallback(IntPtr hwnd, Rectangle regionRect) {
             int cropW = Math.Min(regionRect.Width, 800);
             int cropH = Math.Min(regionRect.Height, 600);
 
             IntPtr hdcSrc = IntPtr.Zero, hdcMem = IntPtr.Zero;
             IntPtr hBitmap = IntPtr.Zero, hOldBmp = IntPtr.Zero;
-            Bitmap bmp = null;
 
             try {
                 hdcSrc = GetDC(hwnd);
-                if (hdcSrc == IntPtr.Zero) return false;
+                if (hdcSrc == IntPtr.Zero) return null;
 
                 hdcMem = CreateCompatibleDC(hdcSrc);
                 hBitmap = CreateCompatibleBitmap(hdcSrc, cropW, cropH);
@@ -405,24 +547,26 @@ namespace OnTopReplica.MultiWindow {
                     regionRect.X, regionRect.Y, SRCCOPY);
                 SelectObject(hdcMem, hOldBmp);
 
-                if (!ok) return false;
+                if (!ok) return null;
 
-                bmp = Bitmap.FromHbitmap(hBitmap);
-                return ScanBitmapForColor(bmp, enabledCategories);
+                return Bitmap.FromHbitmap(hBitmap);
             }
             catch {
-                return false;
+                return null;
             }
             finally {
-                if (bmp != null) bmp.Dispose();
                 if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
                 if (hdcMem != IntPtr.Zero) DeleteDC(hdcMem);
                 if (hdcSrc != IntPtr.Zero) ReleaseDC(hwnd, hdcSrc);
             }
         }
 
+        #endregion
+
+        #region Color Detection
+
         /// <summary>
-        /// Scans a bitmap for color matches using the same HSV classification as ColorDetectionProcessor.
+        /// Scans a bitmap for color matches using HSV classification.
         /// </summary>
         private bool ScanBitmapForColor(Bitmap bmp, HashSet<ColorCategory> enabledCategories) {
             if (bmp == null) return false;
@@ -451,11 +595,10 @@ namespace OnTopReplica.MultiWindow {
                     int rowOffset = y * stride;
                     for (int x = 0; x < w; x++) {
                         int idx = rowOffset + x * 4;
-                        byte pb = pixels[idx];      // B
-                        byte pg = pixels[idx + 1];  // G
-                        byte pr = pixels[idx + 2];  // R
+                        byte pb = pixels[idx];
+                        byte pg = pixels[idx + 1];
+                        byte pr = pixels[idx + 2];
 
-                        // Skip black and white
                         if (pr <= 15 && pg <= 15 && pb <= 15) continue;
                         if (pr >= 240 && pg >= 240 && pb >= 240) continue;
 
@@ -468,7 +611,6 @@ namespace OnTopReplica.MultiWindow {
                     }
                 }
 
-                // Check thresholds (same as ColorDetectionProcessor)
                 if (enabledCategories.Contains(ColorCategory.Red) && redCount >= 1) {
                     Log.Write("MultiWindow: Red match, {0}px", redCount);
                     return true;
@@ -479,7 +621,7 @@ namespace OnTopReplica.MultiWindow {
                 }
                 if (enabledCategories.Contains(ColorCategory.Gray)) {
                     int grayDensityPct = (int)((long)grayCount * 100 / totalPixels);
-                    if (grayDensityPct >= 8) { // GrayMinDensityPct = 8
+                    if (grayDensityPct >= 8) {
                         Log.Write("MultiWindow: Gray match, density={0}%", grayDensityPct);
                         return true;
                     }
@@ -492,9 +634,6 @@ namespace OnTopReplica.MultiWindow {
             }
         }
 
-        /// <summary>
-        /// HSV-based pixel color classification (same as ColorDetectionProcessor.ClassifyPixelColor).
-        /// </summary>
         private static ColorCategory ClassifyPixelColor(byte r, byte g, byte b) {
             float h, s, v;
             RgbToHsv(r, g, b, out h, out s, out v);
@@ -512,9 +651,6 @@ namespace OnTopReplica.MultiWindow {
             return ColorCategory.None;
         }
 
-        /// <summary>
-        /// RGB to HSV conversion (same as ColorDetectionProcessor.RgbToHsv).
-        /// </summary>
         private static void RgbToHsv(int r, int g, int b, out float h, out float s, out float v) {
             float rf = r / 255f, gf = g / 255f, bf = b / 255f;
             float max = Math.Max(rf, Math.Max(gf, bf));
@@ -538,9 +674,175 @@ namespace OnTopReplica.MultiWindow {
 
         #endregion
 
+        #region Icon Template Matching
+
+        /// <summary>
+        /// Searches for the icon template in the given bitmap using sliding window + color histogram matching.
+        /// Returns true if a match above threshold is found.
+        /// </summary>
+        private bool MatchIconTemplate(Bitmap source) {
+            if (_iconTemplatePixels == null || source == null) return false;
+
+            int srcW = source.Width;
+            int srcH = source.Height;
+            int tplW = _iconTemplateW;
+            int tplH = _iconTemplateH;
+
+            if (srcW < tplW || srcH < tplH) return false;
+
+            // Read source pixels
+            BitmapData srcData = null;
+            byte[] srcPixels;
+            int srcStride;
+
+            try {
+                srcData = source.LockBits(new Rectangle(0, 0, srcW, srcH),
+                    ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                srcStride = srcData.Stride;
+                int byteCount = srcStride * srcH;
+                srcPixels = new byte[byteCount];
+                Marshal.Copy(srcData.Scan0, srcPixels, 0, byteCount);
+            }
+            finally {
+                if (srcData != null) source.UnlockBits(srcData);
+            }
+
+            // Pre-compute template color histogram (16-bin per channel = 4096 bins)
+            int[] tplHist = ComputeColorHistogram(_iconTemplatePixels, _iconTemplateStride, 0, 0, tplW, tplH);
+
+            // Slide the template window across the source, step by 2px for speed
+            int step = Math.Max(1, Math.Min(tplW, tplH) / 4);
+            float bestScore = 0;
+
+            for (int sy = 0; sy <= srcH - tplH; sy += step) {
+                for (int sx = 0; sx <= srcW - tplW; sx += step) {
+                    int[] srcHist = ComputeColorHistogram(srcPixels, srcStride, sx, sy, tplW, tplH);
+                    float score = CompareHistograms(tplHist, srcHist);
+
+                    if (score > bestScore) bestScore = score;
+                    if (score >= _iconMatchThreshold) return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Computes a 16-bin-per-channel color histogram (R,G,B) = 4096 bins total.
+        /// </summary>
+        private static int[] ComputeColorHistogram(byte[] pixels, int stride, int startX, int startY, int w, int h) {
+            int[] hist = new int[16 * 16 * 16]; // 4096 bins
+
+            for (int y = 0; y < h; y++) {
+                int rowOffset = (startY + y) * stride;
+                for (int x = 0; x < w; x++) {
+                    int idx = rowOffset + (startX + x) * 4;
+                    byte b = pixels[idx];
+                    byte g = pixels[idx + 1];
+                    byte r = pixels[idx + 2];
+
+                    int rBin = r >> 4; // 0-15
+                    int gBin = g >> 4;
+                    int bBin = b >> 4;
+                    hist[rBin * 256 + gBin * 16 + bBin]++;
+                }
+            }
+            return hist;
+        }
+
+        /// <summary>
+        /// Compares two histograms using histogram intersection (Swain-Ballard).
+        /// Returns a similarity score from 0.0 to 1.0.
+        /// </summary>
+        private static float CompareHistograms(int[] hist1, int[] hist2) {
+            long intersectionSum = 0;
+            long totalSum = 0;
+
+            for (int i = 0; i < hist1.Length; i++) {
+                intersectionSum += Math.Min(hist1[i], hist2[i]);
+                totalSum += hist1[i];
+            }
+
+            if (totalSum == 0) return 0;
+            return (float)intersectionSum / totalSum;
+        }
+
+        #endregion
+
+        #region Alarm Sound
+
+        /// <summary>
+        /// Plays the icon disappearance alarm sound.
+        /// </summary>
+        private void PlayIconDisappearAlarm() {
+            _alarmStopTimer?.Dispose();
+            _alarmStopTimer = new System.Threading.Timer(_ => StopAlarm(), null, AlarmDuration, System.Threading.Timeout.Infinite);
+
+            Log.Write("MultiWindow icon alarm triggered! volume={0}, file={1}", _alarmVolume, _alarmSoundFile);
+
+            if (!string.IsNullOrEmpty(_alarmSoundFile) && File.Exists(_alarmSoundFile)) {
+                var soundFile = _alarmSoundFile;
+                var volume = _alarmVolume;
+                if (_uiDispatcher != null) {
+                    _uiDispatcher.BeginInvoke((Action)(() => {
+                        try {
+                            if (_mediaPlayer == null)
+                                _mediaPlayer = new System.Windows.Media.MediaPlayer();
+                            _mediaPlayer.Open(new Uri(soundFile));
+                            _mediaPlayer.Volume = volume;
+                            _mediaPlayer.Play();
+                        }
+                        catch (Exception ex) {
+                            Log.Write("MultiWindow alarm play error: {0}", ex.Message);
+                        }
+                    }));
+                }
+                else {
+                    System.Media.SystemSounds.Exclamation.Play();
+                }
+            }
+            else {
+                System.Media.SystemSounds.Exclamation.Play();
+            }
+        }
+
+        private void StopAlarm() {
+            _alarmStopTimer?.Dispose();
+            _alarmStopTimer = null;
+
+            if (_uiDispatcher != null) {
+                _uiDispatcher.BeginInvoke((Action)(() => {
+                    try {
+                        if (_mediaPlayer != null)
+                            _mediaPlayer.Stop();
+                    }
+                    catch { }
+                }));
+            }
+        }
+
+        #endregion
+
         public void Dispose() {
             StopDetection();
             _windows.Clear();
+            _alarmStopTimer?.Dispose();
+            if (_iconTemplate != null) {
+                _iconTemplate.Dispose();
+                _iconTemplate = null;
+            }
+            if (_uiDispatcher != null) {
+                _uiDispatcher.BeginInvoke((Action)(() => {
+                    try {
+                        if (_mediaPlayer != null) {
+                            _mediaPlayer.Stop();
+                            _mediaPlayer.Close();
+                            _mediaPlayer = null;
+                        }
+                    }
+                    catch { }
+                }));
+            }
         }
     }
 }

@@ -11,9 +11,7 @@ namespace OnTopReplica.SidePanels {
 
     /// <summary>
     /// Side panel for configuring multi-window monitoring.
-    /// Shows a list of available windows with checkboxes for selection,
-    /// radio-style selection for primary window, and controls for
-    /// enabling/disabling color detection per window.
+    /// Includes independent color detection settings and icon template matching.
     /// </summary>
     partial class MultiWindowPanel : SidePanel {
 
@@ -32,10 +30,14 @@ namespace OnTopReplica.SidePanels {
             base.OnFirstShown(form);
 
             _manager = form.MultiWindowManager;
+            _manager.CaptureUIDispatcher();
             _manager.WindowListChanged += RefreshList;
+            _manager.IconDisappearedAlarm += OnIconDisappearedAlarm;
 
             LoadAvailableWindows();
             SyncCheckStatesFromManager();
+            SyncColorSettingsFromManager();
+            SyncIconSettingsFromManager();
             UpdateStatus();
         }
 
@@ -44,12 +46,12 @@ namespace OnTopReplica.SidePanels {
 
             if (_manager != null) {
                 _manager.WindowListChanged -= RefreshList;
+                _manager.IconDisappearedAlarm -= OnIconDisappearedAlarm;
             }
         }
 
-        /// <summary>
-        /// Loads available system windows into the ListView.
-        /// </summary>
+        #region Window List
+
         private void LoadAvailableWindows() {
             listWindows.Items.Clear();
             if (_imageList != null) _imageList.Dispose();
@@ -74,9 +76,8 @@ namespace OnTopReplica.SidePanels {
                     item.ImageKey = w.Handle.ToString();
                 }
 
-                // SubItems: [0]=Title, [1]=Status, [2]=Primary
-                item.SubItems.Add(""); // Status column
-                item.SubItems.Add(IsPrimaryWindow(w) ? "★" : ""); // Primary indicator
+                item.SubItems.Add("");
+                item.SubItems.Add(IsPrimaryWindow(w) ? "\u2605" : "");
 
                 listWindows.Items.Add(item);
             }
@@ -89,9 +90,6 @@ namespace OnTopReplica.SidePanels {
             return primary != null && primary.WindowHandle.Handle == handle.Handle;
         }
 
-        /// <summary>
-        /// Syncs checkbox states from the manager's current list.
-        /// </summary>
         private void SyncCheckStatesFromManager() {
             _updatingChecks = true;
             try {
@@ -102,7 +100,7 @@ namespace OnTopReplica.SidePanels {
 
                     bool isPrimary = IsPrimaryWindow(wh);
                     if (item.SubItems.Count > 2)
-                        item.SubItems[2].Text = isPrimary ? "★" : "";
+                        item.SubItems[2].Text = isPrimary ? "\u2605" : "";
                 }
             }
             finally {
@@ -112,9 +110,6 @@ namespace OnTopReplica.SidePanels {
 
         private bool _updatingChecks = false;
 
-        /// <summary>
-        /// Handles the checkbox ItemCheck event to add/remove windows from monitoring.
-        /// </summary>
         private void listWindows_ItemCheck(object sender, ItemCheckEventArgs e) {
             if (_updatingChecks) return;
 
@@ -128,23 +123,18 @@ namespace OnTopReplica.SidePanels {
                 _manager.RemoveWindow(handle);
             }
 
-            // Defer UI update to avoid flicker during event
             BeginInvoke((Action)(() => {
                 SyncCheckStatesFromManager();
                 UpdateStatus();
             }));
         }
 
-        /// <summary>
-        /// Double-click sets a window as primary.
-        /// </summary>
         private void listWindows_DoubleClick(object sender, EventArgs e) {
             if (listWindows.SelectedItems.Count == 0) return;
 
             var item = listWindows.SelectedItems[0];
             var handle = (WindowHandle)item.Tag;
 
-            // Ensure it's in the monitored list first
             if (!_manager.Windows.Any(mw => mw.WindowHandle.Handle == handle.Handle)) {
                 _manager.AddWindow(handle);
             }
@@ -154,9 +144,6 @@ namespace OnTopReplica.SidePanels {
             UpdateStatus();
         }
 
-        /// <summary>
-        /// "Set Primary" button click handler.
-        /// </summary>
         private void btnSetPrimary_Click(object sender, EventArgs e) {
             if (listWindows.SelectedItems.Count == 0) return;
 
@@ -172,9 +159,175 @@ namespace OnTopReplica.SidePanels {
             UpdateStatus();
         }
 
+        #endregion
+
+        #region Color Detection Settings
+
+        private bool _updatingColorSettings = false;
+
+        private void SyncColorSettingsFromManager() {
+            _updatingColorSettings = true;
+            try {
+                chkColorEnabled.Checked = _manager.ColorDetectionEnabled;
+                chkRed.Checked = _manager.EnabledCategories.Contains(ColorCategory.Red);
+                chkOrange.Checked = _manager.EnabledCategories.Contains(ColorCategory.Orange);
+                chkGray.Checked = _manager.EnabledCategories.Contains(ColorCategory.Gray);
+
+                chkRed.Enabled = _manager.ColorDetectionEnabled;
+                chkOrange.Enabled = _manager.ColorDetectionEnabled;
+                chkGray.Enabled = _manager.ColorDetectionEnabled;
+            }
+            finally {
+                _updatingColorSettings = false;
+            }
+        }
+
+        private void chkColorEnabled_CheckedChanged(object sender, EventArgs e) {
+            if (_updatingColorSettings) return;
+            _manager.ColorDetectionEnabled = chkColorEnabled.Checked;
+            chkRed.Enabled = chkColorEnabled.Checked;
+            chkOrange.Enabled = chkColorEnabled.Checked;
+            chkGray.Enabled = chkColorEnabled.Checked;
+        }
+
+        private void chkRed_CheckedChanged(object sender, EventArgs e) {
+            if (_updatingColorSettings) return;
+            _manager.SetCategoryEnabled(ColorCategory.Red, chkRed.Checked);
+        }
+
+        private void chkOrange_CheckedChanged(object sender, EventArgs e) {
+            if (_updatingColorSettings) return;
+            _manager.SetCategoryEnabled(ColorCategory.Orange, chkOrange.Checked);
+        }
+
+        private void chkGray_CheckedChanged(object sender, EventArgs e) {
+            if (_updatingColorSettings) return;
+            _manager.SetCategoryEnabled(ColorCategory.Gray, chkGray.Checked);
+        }
+
+        #endregion
+
+        #region Icon Detection Settings
+
+        private void SyncIconSettingsFromManager() {
+            chkIconEnabled.Checked = _manager.IconDetectionEnabled;
+            UpdateIconPreview();
+            UpdateIconControlsEnabled();
+        }
+
+        private void UpdateIconControlsEnabled() {
+            bool enabled = chkIconEnabled.Checked;
+            btnCaptureIcon.Enabled = enabled;
+            btnLoadIcon.Enabled = enabled;
+            btnClearIcon.Enabled = enabled && _manager.IconTemplate != null;
+            picIconPreview.Enabled = enabled;
+        }
+
+        private void UpdateIconPreview() {
+            if (_manager.IconTemplate != null) {
+                picIconPreview.Image = _manager.IconTemplate;
+                picIconPreview.SizeMode = PictureBoxSizeMode.Zoom;
+                lblIconStatus.Text = string.Format("模板: {0}x{1}", _manager.IconTemplate.Width, _manager.IconTemplate.Height);
+            }
+            else {
+                picIconPreview.Image = null;
+                lblIconStatus.Text = "未设置模板";
+            }
+            btnClearIcon.Enabled = chkIconEnabled.Checked && _manager.IconTemplate != null;
+        }
+
+        private void chkIconEnabled_CheckedChanged(object sender, EventArgs e) {
+            _manager.IconDetectionEnabled = chkIconEnabled.Checked;
+            UpdateIconControlsEnabled();
+        }
+
         /// <summary>
-        /// "Start Monitor" button click handler — begins multi-window detection.
+        /// Capture icon template from the current ThumbnailPanel preview.
+        /// User selects a rectangular region by drawing on a snapshot.
         /// </summary>
+        private void btnCaptureIcon_Click(object sender, EventArgs e) {
+            if (ParentMainForm == null) return;
+
+            // Take a snapshot of the current ThumbnailPanel
+            Bitmap snapshot = null;
+            try {
+                var panel = ParentMainForm.ThumbnailPanel;
+                if (panel == null || panel.Width <= 0 || panel.Height <= 0) {
+                    MessageBox.Show("请先选择一个预览窗口。", "图形捕获", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                snapshot = new Bitmap(panel.Width, panel.Height);
+                panel.DrawToBitmap(snapshot, new Rectangle(0, 0, panel.Width, panel.Height));
+            }
+            catch (Exception ex) {
+                MessageBox.Show("截图失败: " + ex.Message, "图形捕获", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // Show capture dialog
+            using (var dlg = new IconCaptureDialog(snapshot)) {
+                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.CapturedRegion != null) {
+                    _manager.SetIconTemplate(dlg.CapturedRegion);
+                    UpdateIconPreview();
+                }
+            }
+
+            snapshot.Dispose();
+        }
+
+        /// <summary>
+        /// Load icon template from file.
+        /// </summary>
+        private void btnLoadIcon_Click(object sender, EventArgs e) {
+            using (var ofd = new OpenFileDialog()) {
+                ofd.Title = "选择图形模板图片";
+                ofd.Filter = "图片文件|*.png;*.bmp;*.jpg;*.jpeg;*.gif|所有文件|*.*";
+                if (ofd.ShowDialog(this) == DialogResult.OK) {
+                    try {
+                        using (var img = new Bitmap(ofd.FileName)) {
+                            _manager.SetIconTemplate(img);
+                        }
+                        UpdateIconPreview();
+                    }
+                    catch (Exception ex) {
+                        MessageBox.Show("加载图片失败: " + ex.Message, "图形模板", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        private void btnClearIcon_Click(object sender, EventArgs e) {
+            _manager.SetIconTemplate(null);
+            UpdateIconPreview();
+        }
+
+        private void OnIconDisappearedAlarm() {
+            if (InvokeRequired) {
+                BeginInvoke((Action)OnIconDisappearedAlarm);
+                return;
+            }
+
+            lblIconStatus.Text = "!! 图形已从所有窗口消失 !!";
+            lblIconStatus.ForeColor = Color.Red;
+
+            // Reset after 5 seconds
+            var timer = new Timer { Interval = 5000 };
+            timer.Tick += (s, ev) => {
+                timer.Stop();
+                timer.Dispose();
+                if (!IsDisposed) {
+                    lblIconStatus.ForeColor = SystemColors.ControlText;
+                    UpdateIconPreview();
+                }
+            };
+            timer.Start();
+        }
+
+        #endregion
+
+        #region Buttons
+
         private void btnStartMonitor_Click(object sender, EventArgs e) {
             if (_manager.Windows.Count == 0) {
                 MessageBox.Show("请先勾选至少一个要监控的窗口。",
@@ -182,15 +335,11 @@ namespace OnTopReplica.SidePanels {
                 return;
             }
 
-            // Ensure ColorDetectionProcessor is enabled
-            ColorDetectionProcessor processor = null;
-            try {
-                processor = ParentMainForm.MessagePumpManager.Get<ColorDetectionProcessor>();
-            }
-            catch { }
+            bool hasColor = _manager.ColorDetectionEnabled && _manager.EnabledCategories.Count > 0;
+            bool hasIcon = _manager.IconDetectionEnabled && _manager.IconTemplate != null;
 
-            if (processor == null || !processor.Enabled) {
-                MessageBox.Show("请先在颜色警报面板中启用颜色检测功能。",
+            if (!hasColor && !hasIcon) {
+                MessageBox.Show("请至少启用一种检测方式（颜色检测或图形检测）。",
                     "多窗口监控", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -199,28 +348,21 @@ namespace OnTopReplica.SidePanels {
             UpdateStatus();
         }
 
-        /// <summary>
-        /// "Stop Monitor" button click handler.
-        /// </summary>
         private void btnStopMonitor_Click(object sender, EventArgs e) {
             _manager.StopDetection();
             UpdateStatus();
         }
 
-        /// <summary>
-        /// "Refresh" button — reload available windows.
-        /// </summary>
         private void btnRefresh_Click(object sender, EventArgs e) {
             LoadAvailableWindows();
             SyncCheckStatesFromManager();
         }
 
-        /// <summary>
-        /// "Close" button.
-        /// </summary>
         private void btnClose_Click(object sender, EventArgs e) {
             OnRequestClosing();
         }
+
+        #endregion
 
         private void RefreshList() {
             if (InvokeRequired) {

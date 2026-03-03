@@ -16,6 +16,7 @@ namespace OnTopReplica.MultiWindow {
             IsColorDetectionEnabled = true;
             LastDetectionResult = false;
             LastDetectionTime = DateTime.MinValue;
+            LastIconDetected = false;
         }
 
         /// <summary>
@@ -43,6 +44,11 @@ namespace OnTopReplica.MultiWindow {
         /// Timestamp of the last color detection scan.
         /// </summary>
         public DateTime LastDetectionTime { get; set; }
+
+        /// <summary>
+        /// Whether the reference icon was detected in the last scan.
+        /// </summary>
+        public bool LastIconDetected { get; set; }
 
         /// <summary>
         /// Gets the window title for display.
