@@ -459,13 +459,15 @@ namespace OnTopReplica.MessagePumpProcessors {
         }
 
         /// <summary>
-        /// Last resort capture. First tries PrintWindow(PW_RENDERFULLCONTENT) on OnTopReplica's own
-        /// ThumbnailPanel — which uses DWM composition and is never occluded — then falls back to
-        /// CopyFromScreen only if that also fails.
+        /// Last resort capture. Tries to capture what OnTopReplica's ThumbnailPanel is *visually
+        /// showing* on screen — first via PrintWindow(PW_RENDERFULLCONTENT), then via
+        /// CopyFromScreen at the panel's own screen coordinates (DWM always renders it correctly
+        /// there regardless of source window occlusion). Never falls back to the source window's
+        /// screen coords, which would capture whatever is covering it.
         /// </summary>
         private bool DetectColorScreenCapture(IntPtr windowHandle, Rectangle regionRect)
         {
-            // --- 优先方案：PrintWindow 截取 ThumbnailPanel（DWM合成，不受源窗口遮挡影响） ---
+            // 获取 ThumbnailPanel 的句柄和屏幕坐标（必须在 UI 线程上访问）
             MainForm mainForm = null;
             foreach (Form form in Application.OpenForms)
             {
@@ -476,7 +478,8 @@ namespace OnTopReplica.MessagePumpProcessors {
             {
                 IntPtr panelHandle = IntPtr.Zero;
                 int panelW = 0, panelH = 0;
-                // 必须在 UI 线程上访问控件句柄和尺寸
+                Rectangle panelScreenRect = Rectangle.Empty;
+
                 try
                 {
                     mainForm.Invoke((Action)(() =>
@@ -487,6 +490,9 @@ namespace OnTopReplica.MessagePumpProcessors {
                             panelHandle = panel.Handle;
                             panelW = panel.Width;
                             panelH = panel.Height;
+                            // 获取 panel 在屏幕上的实际坐标（DWM 在此位置渲染缩略图）
+                            Point screenPt = panel.PointToScreen(Point.Empty);
+                            panelScreenRect = new Rectangle(screenPt.X, screenPt.Y, panelW, panelH);
                         }
                     }));
                 }
@@ -494,6 +500,7 @@ namespace OnTopReplica.MessagePumpProcessors {
 
                 if (panelHandle != IntPtr.Zero)
                 {
+                    // --- 方案1: PrintWindow(ThumbnailPanel) ---
                     IntPtr hdcMem = IntPtr.Zero;
                     IntPtr hBitmap = IntPtr.Zero;
                     IntPtr hOldBmp = IntPtr.Zero;
@@ -501,11 +508,10 @@ namespace OnTopReplica.MessagePumpProcessors {
                     Bitmap bmp = null;
                     try
                     {
-                        hdcScreen = GetDC(IntPtr.Zero); // 屏幕 DC，用于创建兼容位图
+                        hdcScreen = GetDC(IntPtr.Zero);
                         hdcMem = CreateCompatibleDC(hdcScreen);
                         hBitmap = CreateCompatibleBitmap(hdcScreen, panelW, panelH);
                         hOldBmp = SelectObject(hdcMem, hBitmap);
-
                         bool ok = PrintWindow(panelHandle, hdcMem, PW_RENDERFULLCONTENT);
                         SelectObject(hdcMem, hOldBmp);
 
@@ -518,22 +524,18 @@ namespace OnTopReplica.MessagePumpProcessors {
                                 _debugCounter++;
                                 if (_debugCounter % 5 == 1)
                                     SaveDebugBitmap(bmp, "thumbnail_panel_capture");
-                                // ThumbnailPanel 已显示选定区域内容，直接扫描整个位图
                                 return SampleBitmapForColor(bmp);
                             }
-                            else
-                            {
-                                Log.Write("ColorDetection ThumbnailPanel: PrintWindow all-black, falling back to CopyFromScreen");
-                            }
+                            Log.Write("ColorDetection ThumbnailPanel: PrintWindow all-black, trying panel CopyFromScreen");
                         }
                         else
                         {
-                            Log.Write("ColorDetection ThumbnailPanel: PrintWindow failed, falling back to CopyFromScreen");
+                            Log.Write("ColorDetection ThumbnailPanel: PrintWindow failed, trying panel CopyFromScreen");
                         }
                     }
                     catch (Exception ex)
                     {
-                        Log.Write("ColorDetection ThumbnailPanel error: {0}", ex.Message);
+                        Log.Write("ColorDetection ThumbnailPanel PrintWindow error: {0}", ex.Message);
                     }
                     finally
                     {
@@ -542,41 +544,43 @@ namespace OnTopReplica.MessagePumpProcessors {
                         if (hdcMem != IntPtr.Zero) DeleteDC(hdcMem);
                         if (hdcScreen != IntPtr.Zero) ReleaseDC(IntPtr.Zero, hdcScreen);
                     }
+
+                    // --- 方案2: CopyFromScreen 截取 ThumbnailPanel 的屏幕坐标 ---
+                    // DWM 始终在 panel 的屏幕位置渲染源窗口内容，此方法比截源窗口坐标更可靠
+                    if (!panelScreenRect.IsEmpty)
+                    {
+                        int maxW = Math.Min(panelScreenRect.Width, 800);
+                        int maxH = Math.Min(panelScreenRect.Height, 600);
+                        Bitmap bmpPanel = null;
+                        try
+                        {
+                            bmpPanel = new Bitmap(maxW, maxH, PixelFormat.Format32bppArgb);
+                            using (Graphics g = Graphics.FromImage(bmpPanel))
+                            {
+                                g.CopyFromScreen(panelScreenRect.X, panelScreenRect.Y, 0, 0, new Size(maxW, maxH));
+                            }
+                            Log.Write("ColorDetection ThumbnailPanel: CopyFromScreen screen={0},{1} {2}x{3}",
+                                panelScreenRect.X, panelScreenRect.Y, maxW, maxH);
+                            _debugCounter++;
+                            if (_debugCounter % 5 == 1)
+                                SaveDebugBitmap(bmpPanel, "thumbnail_panel_screen");
+                            return SampleBitmapForColor(bmpPanel);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Write("ColorDetection ThumbnailPanel CopyFromScreen error: {0}", ex.Message);
+                        }
+                        finally
+                        {
+                            if (bmpPanel != null) bmpPanel.Dispose();
+                        }
+                    }
                 }
             }
 
-            // --- 最终回退：CopyFromScreen（可能包含遮挡窗口的像素） ---
-            var scrRect = WindowManagerMethods.ClientToScreenRect(windowHandle, regionRect);
-            Log.Write("ColorDetection CopyFromScreen fallback: screen={0},{1} {2}x{3}", scrRect.X, scrRect.Y, scrRect.Width, scrRect.Height);
-
-            if (scrRect.Width <= 0 || scrRect.Height <= 0)
-                return false;
-
-            int maxW = Math.Min(scrRect.Width, 800);
-            int maxH = Math.Min(scrRect.Height, 600);
-
-            Bitmap bmpScreen = null;
-            try
-            {
-                bmpScreen = new Bitmap(maxW, maxH, PixelFormat.Format32bppArgb);
-                using (Graphics g = Graphics.FromImage(bmpScreen))
-                {
-                    g.CopyFromScreen(scrRect.X, scrRect.Y, 0, 0, new Size(maxW, maxH));
-                }
-                _debugCounter++;
-                if (_debugCounter % 5 == 1)
-                    SaveDebugBitmap(bmpScreen, "screen_capture");
-                return SampleBitmapForColor(bmpScreen);
-            }
-            catch (Exception ex)
-            {
-                Log.Write("ColorDetection CopyFromScreen error: {0}", ex.Message);
-                return false;
-            }
-            finally
-            {
-                if (bmpScreen != null) bmpScreen.Dispose();
-            }
+            // 无法通过 ThumbnailPanel 获取内容，跳过本次检测（避免对源窗口坐标截图产生误报）
+            Log.Write("ColorDetection: ThumbnailPanel unavailable, skipping detection to avoid false alarm");
+            return false;
         }
 
         /// <summary>
