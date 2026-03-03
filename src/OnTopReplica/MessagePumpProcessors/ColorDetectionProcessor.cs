@@ -546,21 +546,27 @@ namespace OnTopReplica.MessagePumpProcessors {
                     }
 
                     // --- 方案2: CopyFromScreen 截取 ThumbnailPanel 的屏幕坐标 ---
-                    // DWM 始终在 panel 的屏幕位置渲染源窗口内容，此方法比截源窗口坐标更可靠
+                    // DWM 始终在 panel 的屏幕位置渲染源窗口内容，此方法比截源窗口坐标更可靠。
+                    // 向内缩进 PANEL_INSET 像素，跳过可能含窗口边框/装饰的边缘像素。
                     if (!panelScreenRect.IsEmpty)
                     {
-                        int maxW = Math.Min(panelScreenRect.Width, 800);
-                        int maxH = Math.Min(panelScreenRect.Height, 600);
+                        const int PANEL_INSET = 3;
+                        int insetX = panelScreenRect.X + PANEL_INSET;
+                        int insetY = panelScreenRect.Y + PANEL_INSET;
+                        int insetW = Math.Max(1, panelScreenRect.Width - PANEL_INSET * 2);
+                        int insetH = Math.Max(1, panelScreenRect.Height - PANEL_INSET * 2);
+                        int maxW = Math.Min(insetW, 800);
+                        int maxH = Math.Min(insetH, 600);
                         Bitmap bmpPanel = null;
                         try
                         {
                             bmpPanel = new Bitmap(maxW, maxH, PixelFormat.Format32bppArgb);
                             using (Graphics g = Graphics.FromImage(bmpPanel))
                             {
-                                g.CopyFromScreen(panelScreenRect.X, panelScreenRect.Y, 0, 0, new Size(maxW, maxH));
+                                g.CopyFromScreen(insetX, insetY, 0, 0, new Size(maxW, maxH));
                             }
-                            Log.Write("ColorDetection ThumbnailPanel: CopyFromScreen screen={0},{1} {2}x{3}",
-                                panelScreenRect.X, panelScreenRect.Y, maxW, maxH);
+                            Log.Write("ColorDetection ThumbnailPanel: CopyFromScreen screen={0},{1} {2}x{3} (inset={4})",
+                                insetX, insetY, maxW, maxH, PANEL_INSET);
                             _debugCounter++;
                             if (_debugCounter % 5 == 1)
                                 SaveDebugBitmap(bmpPanel, "thumbnail_panel_screen");
