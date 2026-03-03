@@ -107,10 +107,10 @@ namespace OnTopReplica.MultiWindow {
         }
 
         /// <summary>
-        /// Gets whether multi-window monitoring is active.
+        /// Gets whether multi-window monitoring is active (detection thread is running).
         /// </summary>
         public bool IsActive {
-            get { return _windows.Count > 0; }
+            get { return _detectionRunning; }
         }
 
         #region Independent Color Detection Settings
