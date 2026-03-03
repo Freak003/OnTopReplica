@@ -76,7 +76,7 @@ namespace OnTopReplica.MultiWindow {
         private int _iconTemplateH = 0;
         private int _iconTemplateStride = 0;
         private bool _iconDetectionEnabled = false;
-        private float _iconMatchThreshold = 0.85f; // 85% similarity required
+        private float _iconMatchThreshold = 0.82f; // 82% similarity required (lowered from 0.85 to reduce false negatives on scaled windows)
         // Normalization size: the ThumbnailPanel display size at template capture time.
         // Captured window regions are resized to this before matching to correct scale mismatch.
         private int _iconCaptureNormalizeW = 0;
